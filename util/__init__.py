@@ -1,5 +1,5 @@
 """Utils for the entire project."""
-from manifold import (
+from .manifold import (
     Manifold,
     NSimplex,
 )
