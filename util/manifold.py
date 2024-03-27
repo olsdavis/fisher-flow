@@ -10,7 +10,7 @@ import ot
 from einops import rearrange
 
 
-from util import usinc
+from util import safe_arccos, usinc
 
 
 class Manifold(ABC):
@@ -185,9 +185,5 @@ class NSimplex(Manifold):
         """
         See `Manifold.geodesic_distance`.
         """
-        eps = 1e-6  # doesn't work for <= 1e-7
         d = (p * q).sqrt().sum(dim=-1, keepdim=True)
-        mask = torch.abs(d - 1.0) < eps
-        d[mask] = 0.0
-        d[~mask] = 2.0 * d[~mask].clamp(-1.0 + eps, 1.0 + eps).arccos()
-        return d
+        return 2.0 * safe_arccos(d)

@@ -4,6 +4,7 @@ from .distribution import (
     generate_dirichlet_mixture,
 )
 from .maths import (
+    safe_arccos,
     usinc,
 )
 from .manifold import (
