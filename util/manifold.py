@@ -103,12 +103,24 @@ class Manifold(ABC):
         Computes the pairwise distances between `x_0` and `x_1`.
         Based on: `https://github.com/DreamFold/FoldFlow/blob/main/FoldFlow/utils/optimal_transport.py`.
         """
+        # points
         n = x_0.size(0)
-        x0 = rearrange(x_0, 'b c d -> b (c d)', c=3, d=3)
-        x1 = rearrange(x_1, 'b c d -> b (c d)', c=3, d=3)
-        mega_batch_x0 = rearrange(x0.repeat_interleave(n, dim=0), 'b (c d) -> b c d', c=3, d=3)
-        mega_batch_x1 = rearrange(x1.repeat(n, 1), 'b (c d) -> b c d', c=3, d=3)
-        distances = self.geodesic_distance(mega_batch_x0, mega_batch_x1)**2
+        # if on product space
+        prods = 0 if len(x_0.shape) == 2 else x_0.size(1)
+        # dimension on product space
+        d = x_0.size(-1)
+
+        if prods > 0:
+            x_0 = rearrange(x_0, 'b c d -> b (c d)', c=prods, d=d)
+            x_1 = rearrange(x_1, 'b c d -> b (c d)', c=prods, d=d)
+
+        x_0 = x_0.repeat_interleave(n, dim=0)
+        x_1 = x_1.repeat(n, 1)
+
+        if prods > 0:
+            x_0 = rearrange(x_0, 'b (c d) -> b c d', c=prods, d=d)
+            x_1 = rearrange(x_1, 'b (c d) -> b c d', c=prods, d=d)
+        distances = self.geodesic_distance(x_0, x_1) ** 2
         return distances.reshape(n, n)
 
     def wassertstein_dist(
@@ -173,4 +185,9 @@ class NSimplex(Manifold):
         """
         See `Manifold.geodesic_distance`.
         """
-        return 2.0 * torch.arccos((p * q).sqrt().sum(dim=-1, keepdim=True))
+        eps = 1e-6  # doesn't work for <= 1e-7
+        d = (p * q).sqrt().sum(dim=-1, keepdim=True)
+        mask = torch.abs(d - 1.0) < eps
+        d[mask] = 0.0
+        d[~mask] = 2.0 * d[~mask].clamp(-1.0 + eps, 1.0 + eps).arccos()
+        return d
