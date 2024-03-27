@@ -1,9 +1,16 @@
 """Some utils for manifolds."""
 from abc import ABC, abstractmethod
+from functools import partial
+import math
 
 
 import torch
 from torch import Tensor, nn
+import ot
+from einops import rearrange
+
+
+from util import usinc
 
 
 class Manifold(ABC):
@@ -37,7 +44,21 @@ class Manifold(ABC):
         Returns:
             The logarithmic map.
         """
+    
+    @abstractmethod
+    def geodesic_distance(self, p: Tensor, q: Tensor) -> Tensor:
+        """
+        Returns the geodesic distance of points `p` and `q` on the manifold.
 
+        Parameters:
+            - `p`, `q`: two points on the manifold of dimensions
+                `(B, ..., D)`.
+        
+        Returns:
+            The geodesic distance.
+        """
+
+    @torch.no_grad()
     def geodesic_interpolant(self, x_0: Tensor, x_1: Tensor, t: Tensor) -> Tensor:
         """
         Returns the geodesic interpolant at time `t`, i.e.,
@@ -66,17 +87,66 @@ class Manifold(ABC):
         Applies Euler integration on the manifold for the field defined
         by `model`.
         """
-        raise NotImplementedError("TODO")
+        dt = 1.0 / steps
+        x = x_0
+        for i in range(steps):
+            t = torch.ones((x.size(0),) + (1,) * (len(x_0.shape) - 1)) * dt * (i + 1)
+            x = self.exp_map(x, model(x, t) * dt)
+        return x
 
+    def pairwise_geodesic_distance(
+        self,
+        x_0: Tensor,
+        x_1: Tensor,
+    ) -> Tensor:
+        """
+        Computes the pairwise distances between `x_0` and `x_1`.
+        Based on: `https://github.com/DreamFold/FoldFlow/blob/main/FoldFlow/utils/optimal_transport.py`.
+        """
+        n = x_0.size(0)
+        x0 = rearrange(x_0, 'b c d -> b (c d)', c=3, d=3)
+        x1 = rearrange(x_1, 'b c d -> b (c d)', c=3, d=3)
+        mega_batch_x0 = rearrange(x0.repeat_interleave(n, dim=0), 'b (c d) -> b c d', c=3, d=3)
+        mega_batch_x1 = rearrange(x1.repeat(n, 1), 'b (c d) -> b c d', c=3, d=3)
+        distances = self.geodesic_distance(mega_batch_x0, mega_batch_x1)**2
+        return distances.reshape(n, n)
 
-def usinc(theta: Tensor) -> Tensor:
-    """Unnormalized sinc."""
-    return torch.sin(theta) / theta
+    def wassertstein_dist(
+        self,
+        x_0: Tensor,
+        x_1: Tensor,
+        method: str = "exact",
+        reg: float = 0.05,
+        power: int = 2,
+    ) -> float:
+        """
+        Estimates the `power`-Wassertstein distance between the two distributions
+        the samples of which are in `x_0` and `x_1`.
+
+        Based on: `https://github.com/DreamFold/FoldFlow/blob/main/FoldFlow/utils/optimal_transport.py`.
+        """
+        assert power in [1, 2], "power must be either 1 or 2"
+        if method == "exact":
+            ot_fn = ot.emd2
+        elif method == "sinkhorn":
+            ot_fn = partial(ot.sinkhorn2, reg=reg)
+        else:
+            raise NotImplementedError(f"not implemented method: {method}")
+        a, b = ot.unif(x_0.shape[0]), ot.unif(x_1.shape[0])
+        m = self.pairwise_geodesic_distance(x_0, x_1)
+        if power == 2:
+            m = m ** 2
+        ret = ot_fn(a, b, m.detach().cpu().numpy(), numItermax=1e7)
+        if power == 2:
+            ret = math.sqrt(ret)
+        return ret
 
 
 class NSimplex(Manifold):
     """
     Defines an n-simplex (representable in n - 1 dimensions).
+
+    Based on `https://juliamanifolds.github.io`.
     """
 
     def exp_map(self, p: Tensor, v: Tensor) -> Tensor:
@@ -98,3 +168,9 @@ class NSimplex(Manifold):
         denom = (1.0 - dot ** 2).sqrt()
         fact = rt_prod - dot * p
         return (dist / denom) * fact
+    
+    def geodesic_distance(self, p: Tensor, q: Tensor) -> Tensor:
+        """
+        See `Manifold.geodesic_distance`.
+        """
+        return 2.0 * torch.arccos((p * q).sqrt().sum(dim=-1, keepdim=True))
