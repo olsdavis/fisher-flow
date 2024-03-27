@@ -123,7 +123,7 @@ class Manifold(ABC):
         distances = self.geodesic_distance(x_0, x_1) ** 2
         return distances.reshape(n, n)
 
-    def wassertstein_dist(
+    def wasserstein_dist(
         self,
         x_0: Tensor,
         x_1: Tensor,
@@ -132,7 +132,7 @@ class Manifold(ABC):
         power: int = 2,
     ) -> float:
         """
-        Estimates the `power`-Wassertstein distance between the two distributions
+        Estimates the `power`-Wasserstein distance between the two distributions
         the samples of which are in `x_0` and `x_1`.
 
         Based on: `https://github.com/DreamFold/FoldFlow/blob/main/FoldFlow/utils/optimal_transport.py`.
