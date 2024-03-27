@@ -166,7 +166,7 @@ class NSimplex(Manifold):
         See `Manifold.exp_map`.
         """
         s = torch.sqrt(p)
-        xs = v / s / 2.0
+        xs = v / (s + 1e-7) / 2.0
         theta = xs.norm(dim=-1, keepdim=True)
         return (torch.cos(theta) * s + usinc(theta) * xs).square()
     
@@ -179,7 +179,7 @@ class NSimplex(Manifold):
         dist = 2.0 * torch.arccos(dot)
         denom = (1.0 - dot ** 2).sqrt()
         fact = rt_prod - dot * p
-        return (dist / denom) * fact
+        return (dist / (denom + 1e-7)) * fact
     
     def geodesic_distance(self, p: Tensor, q: Tensor) -> Tensor:
         """
