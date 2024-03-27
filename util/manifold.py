@@ -38,7 +38,6 @@ class Manifold(ABC):
             The logarithmic map.
         """
 
-
     def geodesic_interpolant(self, x_0: Tensor, x_1: Tensor, t: Tensor) -> Tensor:
         """
         Returns the geodesic interpolant at time `t`, i.e.,
