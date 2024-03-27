@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 
 
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 
 
 class Manifold(ABC):
@@ -54,6 +54,24 @@ class Manifold(ABC):
         if len(t.shape) < 2:
             t = t.unsqueeze(-1)
         return self.exp_map(x_0, t * self.log_map(x_0, x_1))
+    
+    @torch.no_grad()
+    def tangent_euler(
+        self,
+        x_0: Tensor,
+        model: nn.Module,
+        steps: int,
+    ) -> list[Tensor]:
+        """
+        Applies Euler integration on the manifold for the field defined
+        by `model`.
+        """
+        raise NotImplementedError("TODO")
+
+
+def usinc(theta: Tensor) -> Tensor:
+    """Unnormalized sinc."""
+    return torch.sin(theta) / theta
 
 
 class NSimplex(Manifold):
@@ -65,14 +83,10 @@ class NSimplex(Manifold):
         """
         See `Manifold.exp_map`.
         """
-        vp = v / p.sqrt()
-        vpn = vp.norm(dim=-1, keepdim=True)
-
-        # calculate terms
-        cst = 0.5 * (p + vp.square() / vpn.square())
-        cos_term = 0.5 * (p - vp.square() / vpn.square()) * torch.cos(vpn)
-        sin_term = (vp / vpn) * p.sqrt() * torch.sin(vpn)
-        return cst + cos_term + sin_term
+        s = torch.sqrt(p)
+        xs = v / s / 2.0
+        theta = xs.norm(dim=-1, keepdim=True)
+        return (torch.cos(theta) * s + usinc(theta) * xs).square()
     
     def log_map(self, p: Tensor, q: Tensor) -> Tensor:
         """
