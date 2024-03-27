@@ -61,10 +61,9 @@ class NSimplex(Manifold):
         """
         See `Manifold.log_map`.
         """
-        prt = p.sqrt()
-        qrt = q.sqrt()
-        dot = (prt * qrt).sum(dim=-1, keepdim=True)
+        rt_prod = (p * q).sqrt()
+        dot = rt_prod.sum(dim=-1, keepdim=True)
         dist = 2.0 * torch.arccos(dot)
-        denom = (1.0 - dot).sqrt()
-        fact = prt * qrt - dot * p
+        denom = (1.0 - dot ** 2).sqrt()
+        fact = rt_prod - dot * p
         return (dist / denom) * fact

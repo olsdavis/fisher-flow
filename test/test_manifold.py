@@ -15,8 +15,10 @@ class TestNSimplex(unittest.TestCase):
         m = NSimplex()
         x_0 = torch.Tensor([0.25, 0.5, 0.25])
         x_1 = torch.Tensor([0.4, 0.3, 0.3])
+        back = m.exp_map(x_0, m.log_map(x_0, x_1))
         self.assertTrue(
-            torch.allclose(m.exp_map(x_0, m.log_map(x_0, x_1)), x_1),
+            torch.allclose(back, x_1),
+            f"too large difference: {back}, {x_1}"
         )
 
 
