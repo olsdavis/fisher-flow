@@ -39,6 +39,24 @@ class Manifold(ABC):
         """
 
 
+    def geodesic_interpolant(self, x_0: Tensor, x_1: Tensor, t: Tensor) -> Tensor:
+        """
+        Returns the geodesic interpolant at time `t`, i.e.,
+        `exp_{x_0}(t log_{x_0}(x_1))`.
+
+        Parameters:
+            - `x_0`, `x_1`: two points on the manifold of dimensions
+                `(B, ..., D)`.
+            - `t`: the time tensor of dimensions `(B)` or `(B, 1)`.
+        
+        Returns:
+            The geodesic interpolant at time `t`.
+        """
+        if len(t.shape) < 2:
+            t = t.unsqueeze(-1)
+        return self.exp_map(x_0, t * self.log_map(x_0, x_1))
+
+
 class NSimplex(Manifold):
     """
     Defines an n-simplex (representable in n - 1 dimensions).
