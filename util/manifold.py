@@ -166,6 +166,18 @@ class Manifold(ABC):
         """
         return self.metric(x, v, v)
 
+    @abstractmethod
+    def parallel_transport(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
+        """
+        Calculates the parallel transport of `v` in the tangent plane of `p`
+        to that of `q`.
+
+        Parameters:
+            - `p`: starting point;
+            - `q`: end point;
+            - `v`: the vector to transport.
+        """
+
 
 class NSimplex(Manifold):
     """
@@ -208,3 +220,52 @@ class NSimplex(Manifold):
         eps = 1e-7
         div = x.sqrt() + eps
         return ((u / div) * (v / div)).sum(dim=-1, keepdim=True)
+
+    def _sphere_map(self, p: Tensor):
+        """
+        Maps `p` to the positive orthant of the sphere.
+        """
+        return p.sqrt()
+
+    def parallel_transport(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
+        """
+        See `Manifold.parallel_transport`. Based on the parallel transport of
+        `NSphere`.
+        """
+        sphere = NSphere()
+        q_s = self._sphere_map(q)
+        y_s = sphere.parallel_transport(
+            self._sphere_map(p),
+            q_s,
+            v / (p.sqrt() + 1e-7),
+        )
+        return y_s * q_s
+
+
+class NSphere(Manifold):
+    """
+    Defines an n-dimensional sphere.
+    
+    Based on: `https://juliamanifolds.github.io`.
+    """
+
+    def exp_map(self, p: Tensor, v: Tensor) -> Tensor:
+        raise NotImplementedError()
+
+    def log_map(self, p: Tensor, q: Tensor) -> Tensor:
+        raise NotImplementedError()
+
+    def geodesic_distance(self, p: Tensor, q: Tensor) -> Tensor:
+        raise NotImplementedError()
+
+    def metric(self, x: Tensor, u: Tensor, v: Tensor) -> Tensor:
+        raise NotImplementedError()
+
+    def parallel_transport(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
+        """
+        See `Manifold.parallel_transport`.
+        """
+        m = p + q
+        mnorm2 = m.square().sum(dim=-1, keepdim=True)
+        factor = 2.0 * (v * q).sum(dim=-1, keepdim=True) / (mnorm2 + 1e-7)
+        return v - m * factor
