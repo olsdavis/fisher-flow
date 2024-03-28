@@ -17,4 +17,5 @@ from .model import (
 )
 from .plot import (
     define_style,
+    save_plot,
 )
