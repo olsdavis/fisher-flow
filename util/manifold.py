@@ -31,7 +31,7 @@ class Manifold(ABC):
         Returns:
             The exponential map.
         """
-    
+
     @abstractmethod
     def log_map(self, p: Tensor, q: Tensor) -> Tensor:
         """
@@ -44,7 +44,7 @@ class Manifold(ABC):
         Returns:
             The logarithmic map.
         """
-    
+
     @abstractmethod
     def geodesic_distance(self, p: Tensor, q: Tensor) -> Tensor:
         """
@@ -75,7 +75,7 @@ class Manifold(ABC):
         if len(t.shape) < 2:
             t = t.unsqueeze(-1)
         return self.exp_map(x_0, t * self.log_map(x_0, x_1))
-    
+
     @torch.no_grad()
     def tangent_euler(
         self,
@@ -153,6 +153,19 @@ class Manifold(ABC):
             ret = math.sqrt(ret)
         return ret
 
+    @abstractmethod
+    def metric(self, x: Tensor, u: Tensor, v: Tensor) -> Tensor:
+        """
+        Calculates the Riemannian metric at point `x` between
+        `u` and `v`.
+        """
+
+    def square_norm_at(self, x: Tensor, v: Tensor) -> Tensor:
+        """
+        Calculates the square of the norm of `v` at the tangent space of `x`.
+        """
+        return self.metric(x, v, v)
+
 
 class NSimplex(Manifold):
     """
@@ -169,7 +182,7 @@ class NSimplex(Manifold):
         xs = v / (s + 1e-7) / 2.0
         theta = xs.norm(dim=-1, keepdim=True)
         return (torch.cos(theta) * s + usinc(theta) * xs).square()
-    
+
     def log_map(self, p: Tensor, q: Tensor) -> Tensor:
         """
         See `Manifold.log_map`.
@@ -180,10 +193,18 @@ class NSimplex(Manifold):
         denom = (1.0 - dot ** 2).sqrt()
         fact = rt_prod - dot * p
         return (dist / (denom + 1e-7)) * fact
-    
+
     def geodesic_distance(self, p: Tensor, q: Tensor) -> Tensor:
         """
         See `Manifold.geodesic_distance`.
         """
         d = (p * q).sqrt().sum(dim=-1, keepdim=True)
         return 2.0 * safe_arccos(d)
+
+    def metric(self, x: Tensor, u: Tensor, v: Tensor) -> Tensor:
+        """
+        See `Manifold.metric`.
+        """
+        eps = 1e-7
+        div = x.sqrt() + eps
+        return ((u / div) * (v / div)).sum(dim=-1, keepdim=True)
