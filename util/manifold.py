@@ -13,6 +13,23 @@ from einops import rearrange
 from util import safe_arccos, usinc
 
 
+def str_to_ot_method(method: str, reg: float = 0.05, reg_m: float = 1.0, loss: bool = False):
+    """
+    Returns the `OT` method corresponding to `method`.
+    """
+    if method == "exact":
+        return ot.emd if not loss else ot.emd2
+    elif method == "sinkhorn":
+        return partial(ot.sinkhorn if not loss else ot.sinkhorn2, reg=reg)
+    elif method == "unbalanced":
+        assert not loss, "no loss method available"
+        return partial(ot.unbalanced.sinkhorn_knopp_unbalanced, reg=reg, reg_m=reg_m)
+    elif method == "partial":
+        assert not loss, "no loss method available"
+        return partial(ot.partial.entropic_partial_wasserstein, reg=reg)
+    raise ValueError(f"Unknown method: {method}")
+
+
 class Manifold(ABC):
     """
     Defines a few essential functions for manifolds.
@@ -138,12 +155,7 @@ class Manifold(ABC):
         Based on: `https://github.com/DreamFold/FoldFlow/blob/main/FoldFlow/utils/optimal_transport.py`.
         """
         assert power in [1, 2], "power must be either 1 or 2"
-        if method == "exact":
-            ot_fn = ot.emd2
-        elif method == "sinkhorn":
-            ot_fn = partial(ot.sinkhorn2, reg=reg)
-        else:
-            raise NotImplementedError(f"not implemented method: {method}")
+        ot_fn = str_to_ot_method(method, reg=reg, loss=True)
         a, b = ot.unif(x_0.shape[0]), ot.unif(x_1.shape[0])
         m = self.pairwise_geodesic_distance(x_0, x_1)
         if power == 2:

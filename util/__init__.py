@@ -10,6 +10,7 @@ from .maths import (
 from .manifold import (
     Manifold,
     NSimplex,
+    str_to_ot_method,
 )
 from .model import (
     MLP,
@@ -18,4 +19,7 @@ from .model import (
 from .plot import (
     define_style,
     save_plot,
+)
+from .sampler import (
+    OTSampler,
 )
