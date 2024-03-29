@@ -1,7 +1,10 @@
 """Utils for the entire project."""
 from .distribution import (
+    estimate_categorical_kl,
     generate_dirichlet,
     generate_dirichlet_mixture,
+    generate_dirichlet_product,
+    set_seeds,
 )
 from .maths import (
     safe_arccos,
@@ -22,4 +25,9 @@ from .plot import (
 )
 from .sampler import (
     OTSampler,
+)
+from .train import (
+    cft_loss_function,
+    dfm_train_step,
+    ot_train_step,
 )

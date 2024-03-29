@@ -64,8 +64,6 @@ class MLP(nn.Module):
         """
         Applies the MLP to the input `(x, t)`.
         """
-        if len(t.shape) < 2:
-            t.unsqueeze(-1)
         out = self.net(torch.cat([x, t], dim=-1))
         if self.simplex_tangent:
             x_3 = -out.sum(dim=-1, keepdim=True)

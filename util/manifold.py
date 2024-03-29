@@ -107,7 +107,7 @@ class Manifold(ABC):
         dt = 1.0 / steps
         x = x_0
         for i in range(steps):
-            t = torch.ones((x.size(0),) + (1,) * (len(x_0.shape) - 1)) * dt * (i + 1)
+            t = torch.ones((x.size(0), x.size(1), 1)) * dt * (i + 1)
             x = self.exp_map(x, model(x, t) * dt)
         return x
 
@@ -204,10 +204,10 @@ class NSimplex(Manifold):
         """
         See `Manifold.exp_map`.
         """
-        s = torch.sqrt(p)
+        s = p.sqrt()
         xs = v / (s + 1e-7) / 2.0
         theta = xs.norm(dim=-1, keepdim=True)
-        return (torch.cos(theta) * s + usinc(theta) * xs).square()
+        return (theta.cos() * s + usinc(theta) * xs).square()
 
     def log_map(self, p: Tensor, q: Tensor) -> Tensor:
         """
@@ -225,7 +225,7 @@ class NSimplex(Manifold):
         See `Manifold.geodesic_distance`.
         """
         d = (p * q).sqrt().sum(dim=-1, keepdim=True)
-        return 2.0 * safe_arccos(d)
+        return 2.0 * safe_arccos(d).sum(dim=1)
 
     def metric(self, x: Tensor, u: Tensor, v: Tensor) -> Tensor:
         """
