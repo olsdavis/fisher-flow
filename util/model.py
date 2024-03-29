@@ -59,7 +59,7 @@ class MLP(nn.Module):
             if i < depth - 1:
                 net += [act]
         self.net = nn.Sequential(*net)
-    
+
     def forward(self, x: Tensor, t: Tensor) -> Tensor:
         """
         Applies the MLP to the input `(x, t)`.

@@ -162,6 +162,8 @@ class Manifold(ABC):
             m = m ** 2
         ret = ot_fn(a, b, m.detach().cpu().numpy(), numItermax=1e7)
         if power == 2:
+            # for slighlty negative values
+            ret = ret if ret > 0.0 else 0.0
             ret = math.sqrt(ret)
         return ret
 

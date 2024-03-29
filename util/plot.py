@@ -1,5 +1,4 @@
 """Useful functions for plotting (namely, style)."""
-import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 
