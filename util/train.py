@@ -22,8 +22,7 @@ def dfm_train_step(
     t = torch.rand((b, 1), device=x_1.device)
     alpha_t = torch.ones_like(x_1) + x_1 * t
     # iterate over 
-    samples = [torch.stack([Dirichlet(alpha_d).sample() for alpha_d in alpha_p]) for alpha_p in alpha_t]
-    x_t = torch.stack(samples).to(x_1.device)
+    x_t = Dirichlet(alpha_t).sample().to(x_1.device)
     p_hat = model(x_t, t)
     return criterion(p_hat, x_1)
 
