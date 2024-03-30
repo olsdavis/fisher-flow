@@ -1,9 +1,8 @@
 """Loss utils."""
-import numpy as np
 import torch
 from torch.distributions.dirichlet import Dirichlet
 from torch import Tensor, nn
-from util import Manifold, OTSampler, generate_dirichlet_product
+from util import Manifold, OTSampler
 
 
 def dfm_train_step(
@@ -45,9 +44,10 @@ def ot_train_step(
         - `time_eps`: "guard" for sampling the time.
     """
     b = x_1.size(0)
-    d = x_1.size(1)
+    k = x_1.size(1)
+    d = x_1.size(-1)
     t = torch.rand((b, 1), device=x_1.device) * (1.0 - time_eps)
-    x_0 = generate_dirichlet_product(b, d, x_1.size(-1)).to(x_1.device)
+    x_0 = Dirichlet(torch.ones(k, d)).sample((b,)).to(x_1.device)
     return cft_loss_function(x_0, x_1, t, m, model, sampler)
 
 

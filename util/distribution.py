@@ -1,11 +1,10 @@
 """Distributional utils."""
 import random
 import torch
-from torch import Tensor
-from torch.distributions.mixture_same_family import MixtureSameFamily
-from torch.distributions.categorical import Categorical
+from torch import Tensor, nn
 from torch.distributions.dirichlet import Dirichlet
 import numpy as np
+from util import NSimplex
 
 
 def set_seeds(seed: int = 0):
@@ -17,53 +16,62 @@ def set_seeds(seed: int = 0):
     np.random.seed(seed)
 
 
-def generate_dirichlet_product(n: int, k: int, d: int) -> Tensor:
+@torch.no_grad()
+def estimate_categorical_kl(
+    model: nn.Module,
+    prior: Dirichlet,
+    real_dist: Tensor,
+    n: int,
+    batch: int = 512,
+    inference_steps: int = 100,
+    sampling_mode: str = "sample",
+) -> float:
     """
-    Generates `n` points from a product of `k` `d`-simplex Dirichlet uniform
-    distributions.
-    """
-    alphas = [[1 for _ in range(d)] for _ in range(k)]
-    return Dirichlet(torch.Tensor(alphas)).sample((n,))
-
-
-def generate_dirichlet(n: int, alpha: list[float]) -> Tensor:
-    """
-    Generates `n` points generated from a Dirichlet distribution of
-    parameter `alpha`.
-    """
-    return Dirichlet(torch.Tensor(alpha)).sample((n,))
-
-
-def generate_dirichlet_mixture(n: int, *alphas: list[float]) -> Tensor:
-    """
-    Generates `n` points from the even mixture of the Dirichlet distributions
-    of parameter `alpha` for each `alpha` in `alphas`.
-    """
-    assert alphas, "there must be at least one set of alpha parameters"
-    dist = torch.stack([torch.Tensor(alpha) for alpha in alphas])
-    even = torch.ones((dist.size(0),)) / dist.size(0)
-    return MixtureSameFamily(
-        component_distribution=Dirichlet(dist),
-        mixture_distribution=Categorical(even),
-    ).sample((n,))
-
-
-def estimate_categorical_kl(points: Tensor, real_dist: Tensor) -> float:
-    """
-    Returns an estimate of the KL divergence of the empirical distribution
-    of `points` from `real_dist`, i.e., "KL(points || real_dist)".
+    Estimates the categorical KL divergence between points produced by the
+    model `model` and `real_dist`. Done by sampling `n` points and estimating
+    thus the different probabilities.
 
     Parameters:
-        - `points`: the points from which to estimate the Dirichlet distribution;
-            the Tensor is of shape `(B, K, D)` defining probability distributions
-            on each of the `BK` `D`-simplices;
-        - `real_dist`: the real probability distribution probabilities, a Tensor
-            of dimension `(K, D)`.
-
-    Using the same method as https://github.com/HannesStark/dirichlet-flow-matching.
+        - `model`: the model;
+        - `prior`: the prior distribution to generate points from for `model`;
+        - `real_dist`: the real distribution tensor of shape `(k, d)`;
+        - `n`: the number of points over which the estimate should be done;
+        - `batch`: the number of points to draw per batch;
+        - `inference_steps`: the number of steps to take for inference;
+        - `sampling_mode`: how to sample points; if "sample", then samples
+            from the distribution produced by the model; if "max" then takes
+            the argmax of the distribution.
+    
+    Returns:
+        An estimate of the KL divergence of the model's distribution from
+        the real distribution, i.e., "KL(model || real_dist)".
     """
-    cat = Categorical(points)
-    samples = cat.sample()
-    samples = torch.nn.functional.one_hot(samples, num_classes=points.size(-1)).float()
-    emp_dist = samples.mean(dim=0)
-    return (emp_dist * (emp_dist.log() - real_dist.log())).sum().item()
+    assert sampling_mode in ["sample", "max"], "not a valid sampling mode"
+
+    # init acc
+    acc = torch.zeros_like(real_dist, device=real_dist.device)
+
+    simplex = NSimplex()
+    model.eval()
+    to_draw = n
+    while to_draw > 0:
+        draw = min(batch, to_draw)
+        x_0 = prior.sample((draw,)).to(real_dist.device)
+        x_1 = simplex.tangent_euler(x_0, model, inference_steps)
+        if sampling_mode == "sample":
+            dist = Dirichlet(x_1)
+            samples = dist.sample()
+            acc += samples.sum(dim=0)
+        else:
+            samples = torch.nn.functional.one_hot(
+                x_1.argmax(dim=-1),
+                real_dist.size(-1),
+            )
+            acc += samples.sum(dim=0)
+        to_draw -= draw
+        del x_0
+        del x_1
+
+    acc /= float(n)
+
+    return (acc * (acc.log() - real_dist.log())).sum().item()
