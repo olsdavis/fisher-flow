@@ -10,6 +10,7 @@ dependencies:
   - matplotlib=3.7.1
   - seaborn=0.12.2
   - pip:
+    - torch==2.1.0
     - POT==0.9.3
     - dirichlet==0.9
     - einops==0.7.0
