@@ -20,6 +20,7 @@ from util import (
 def _generate_dataset(probas: Tensor, n_train: int, n_test: int) -> tuple[Dataset, Dataset]:
     dist = Categorical(probas)
     x_train = torch.nn.functional.one_hot(dist.sample_n(n_train), probas.size(-1))
+    print(x_train.shape)
     x_test = torch.nn.functional.one_hot(dist.sample_n(n_test), probas.size(-1))
     return TensorDataset(x_train), TensorDataset(x_test)
 
@@ -55,7 +56,7 @@ def train(
                 test = torch.cat(test_loader.dataset.tensors)
                 w2 = manifold.wasserstein_dist(test, final_traj, power=2)
                 w2s.append(w2)
-            print(f"--- Epoch {epoch:03d}/{epochs+1:03d}: W2 distance = {w2:.5f}")
+            print(f"--- Epoch {epoch+1:03d}/{epochs:03d}: W2 distance = {w2:.5f}")
 
         # Training
         model.train()
@@ -88,14 +89,17 @@ def train(
                 test_loss += [loss.item()]
         per_epoch_test += [np.mean(test_loss)]
         print(f"--- Epoch {epoch+1:03d}/{epochs:03d}: train loss = {per_epoch_train[-1]};"\
-              f"test loss = {per_epoch_test[-1]}")
+              f" test loss = {per_epoch_test[-1]}")
     plt.plot(np.arange(1, epochs+1), per_epoch_train, label="Train")
     plt.plot(np.arange(1, epochs+1), per_epoch_test, label="Test")
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
+    plt.xlim(left=1)
     plt.legend()
     plt.savefig(f"./out/dfm_toy_losses_{model_name}.pdf", bbox_inches="tight")
+    plt.figure()
     plt.plot(np.arange(1, len(w2s) + 1) * wasserstein_every, w2s)
+    plt.xlim(left=10)
     plt.xlabel("Epoch")
     plt.ylabel("W2 distance")
     plt.savefig(f"./out/dfm_toy_w2_{model_name}.pdf", bbox_inches="tight")
@@ -104,12 +108,13 @@ def train(
 def run_dfm_toy_experiment():
     set_seeds()
     # 3 3-simplex problem
-    real_probas = torch.Tensor([[0.1, 0.3, 0.6], [0.4, 0.4, 0.2], [0.3, 0.4, 0.3]])
+    # [0.1, 0.3, 0.6], [0.4, 0.4, 0.2], [0.3, 0.4, 0.3]
+    real_probas = torch.Tensor([[0.1, 0.3, 0.6]])
     train_dataset, test_dataset = _generate_dataset(real_probas, 10000, 1000)
-    train_loader = DataLoader(train_dataset, batch_size=512, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=512, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False)
     train(
-        50, 1e-3, MLP(3, 4, 64, activation="lrelu"),
+        100, 1e-3, MLP(3, 4, 128, activation="relu"),
         "MLP OT-CFT", train_loader, test_loader, "ot-cft",
     )
     # print(estimate_categorical_kl())

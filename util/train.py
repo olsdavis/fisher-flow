@@ -35,6 +35,7 @@ def ot_train_step(
     m: Manifold,
     model: nn.Module,
     sampler: OTSampler | None,
+    time_eps: float = 0.2,
 ) -> Tensor:
     """
     Returns the loss for a single (OT-)CFT training step.
@@ -43,11 +44,12 @@ def ot_train_step(
         - `x_1`: batch of data points;
         - `m`: manifold;
         - `model`: the model to apply;
-        - `sampler` (optional): the sampler for the OT plan.
+        - `sampler` (optional): the sampler for the OT plan;
+        - `time_eps`: "guard" for sampling the time.
     """
     b = x_1.size(0)
     d = x_1.size(1)
-    t = torch.rand((b, 1, 1), device=x_1.device)
+    t = torch.rand((b, 1, 1), device=x_1.device) * (1.0 - time_eps)
     t = t.repeat((1, d, 1))
     x_0 = generate_dirichlet_product(b, d, x_1.size(-1))
     return cft_loss_function(x_0, x_1, t, m, model, sampler)
