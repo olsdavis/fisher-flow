@@ -107,7 +107,7 @@ class Manifold(ABC):
         dt = 1.0 / steps
         x = x_0
         for i in range(steps):
-            t = torch.ones((x.size(0), 1)) * dt * (i + 1)
+            t = torch.full((x.size(0), 1), dt * (i + 1), device=x_0.device)
             x = self.exp_map(x, model(x, t) * dt)
         return x
 

@@ -51,9 +51,9 @@ def label_smoothing(one_hot_labels, smoothing=0.98):
 
 def _generate_dataset(probas: Tensor, n_train: int, n_test: int) -> tuple[Dataset, Dataset]:
     dist = Categorical(probas)
-    x_train = torch.nn.functional.one_hot(dist.sample_n(n_train), probas.size(-1))
+    x_train = torch.nn.functional.one_hot(dist.sample((n_train,)), probas.size(-1))
     x_train = label_smoothing(x_train)
-    x_test = torch.nn.functional.one_hot(dist.sample_n(n_test), probas.size(-1))
+    x_test = torch.nn.functional.one_hot(dist.sample((n_test,)), probas.size(-1))
     x_test = label_smoothing(x_test)
     return TensorDataset(x_train), TensorDataset(x_test)
 
@@ -89,7 +89,7 @@ def train(
                 k = shape[1]
                 d = shape[2]
                 final_traj = manifold.tangent_euler(generate_dirichlet_product(n, k, d).to(device), model, 100)
-                test = torch.cat(test_loader.dataset.tensors)
+                test = torch.cat(test_loader.dataset.tensors).to(device)
                 w2 = manifold.wasserstein_dist(test, final_traj, power=2)
                 w2s.append(w2)
             print(f"--- Epoch {epoch+1:03d}/{epochs:03d}: W2 distance = {w2:.5f}")
@@ -118,6 +118,7 @@ def train(
         with torch.no_grad():
             for x in test_loader:
                 x = x[0]
+                x = x.to(device)
                 optimizer.zero_grad()
                 if train_method == "ot-cft":
                     loss = ot_train_step(x, manifold, model, ot_sampler)
@@ -149,13 +150,13 @@ def run_dfm_toy_experiment():
     seq_len = 4
     kls = []
     mx = 160
-    epochs = 500
-    for d in range(10, mx+1, 10):
+    epochs = 1000
+    for d in range(20, mx+1, 20):
         set_seeds()
-        real_probas = torch.softmax(torch.rand((seq_len, d)), dim=-1)
+        real_probas = torch.softmax(torch.rand((seq_len, d)), dim=-1).to(device)
         train_dataset, test_dataset = _generate_dataset(real_probas, 10000, 1000)
-        train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
-        test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False)
+        train_loader = DataLoader(train_dataset, batch_size=512, shuffle=True)
+        test_loader = DataLoader(test_dataset, batch_size=512, shuffle=False)
         print(f"---=== {real_probas.size(-1)}-simplices ===---")
         trained = train(
             epochs, 1e-3,
@@ -170,13 +171,13 @@ def run_dfm_toy_experiment():
                 torch.Tensor(torch.ones_like(real_probas)),
             )
             n_points = 10000
-            x_0 = prior.sample((n_points,))
+            x_0 = prior.sample((n_points,)).to(device)
             simplex = NSimplex()
             x_1 = simplex.tangent_euler(x_0, trained, 100)
             kls += [estimate_categorical_kl(x_1, real_probas)]
         print(f"KL {kls[-1]:.5f}")
     plt.figure()
-    plt.plot(np.arange(10, mx+1, 10), kls)
+    plt.plot(np.arange(20, mx+1, 20), kls)
     plt.xlabel("Categories")
     plt.ylabel("KL divergence")
     plt.savefig("./out/kl.pdf", bbox_inches="tight")
