@@ -17,6 +17,8 @@ from .manifold import (
 )
 from .model import (
     MLP,
+    ProductMLP,
+    TembMLP,
     str_to_activation,
 )
 from .plot import (

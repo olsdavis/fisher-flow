@@ -84,13 +84,13 @@ class Manifold(ABC):
         Parameters:
             - `x_0`, `x_1`: two points on the manifold of dimensions
                 `(B, ..., D)`.
-            - `t`: the time tensor of dimensions `(B)` or `(B, 1)`.
+            - `t`: the time tensor of dimensions `(B, 1)`.
         
         Returns:
             The geodesic interpolant at time `t`.
         """
-        if len(t.shape) < 2:
-            t = t.unsqueeze(-1)
+        t = t.unsqueeze(-1)
+        t = t.repeat(1, x_0.size(1), 1)
         return self.exp_map(x_0, t * self.log_map(x_0, x_1))
 
     @torch.no_grad()
@@ -107,7 +107,7 @@ class Manifold(ABC):
         dt = 1.0 / steps
         x = x_0
         for i in range(steps):
-            t = torch.ones((x.size(0), x.size(1), 1)) * dt * (i + 1)
+            t = torch.ones((x.size(0), 1)) * dt * (i + 1)
             x = self.exp_map(x, model(x, t) * dt)
         return x
 
@@ -233,7 +233,7 @@ class NSimplex(Manifold):
         """
         eps = 1e-7
         div = x.sqrt() + eps
-        return ((u / div) * (v / div)).sum(dim=-1, keepdim=True)
+        return ((u / div).abs().clamp(eps, 1e8) * (v / div).abs().clamp(eps, 1e8)).sum(dim=-1, keepdim=True)
 
     def _sphere_map(self, p: Tensor):
         """

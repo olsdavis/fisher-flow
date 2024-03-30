@@ -19,13 +19,11 @@ def dfm_train_step(
     """
     criterion = nn.CrossEntropyLoss()
     b = x_1.size(0)
-    d = x_1.size(1)
-    t = torch.rand((b, 1, 1), device=x_1.device)
-    t = t.repeat((1, d, 1))
+    t = torch.rand((b, 1), device=x_1.device)
     alpha_t = torch.ones_like(x_1) + x_1 * t
     # iterate over 
     samples = [torch.stack([Dirichlet(alpha_d).sample() for alpha_d in alpha_p]) for alpha_p in alpha_t]
-    x_t = torch.stack(samples)
+    x_t = torch.stack(samples).to(x_1.device)
     p_hat = model(x_t, t)
     return criterion(p_hat, x_1)
 
@@ -35,7 +33,7 @@ def ot_train_step(
     m: Manifold,
     model: nn.Module,
     sampler: OTSampler | None,
-    time_eps: float = 0.2,
+    time_eps: float = 0.0,
 ) -> Tensor:
     """
     Returns the loss for a single (OT-)CFT training step.
@@ -49,9 +47,8 @@ def ot_train_step(
     """
     b = x_1.size(0)
     d = x_1.size(1)
-    t = torch.rand((b, 1, 1), device=x_1.device) * (1.0 - time_eps)
-    t = t.repeat((1, d, 1))
-    x_0 = generate_dirichlet_product(b, d, x_1.size(-1))
+    t = torch.rand((b, 1), device=x_1.device) * (1.0 - time_eps)
+    x_0 = generate_dirichlet_product(b, d, x_1.size(-1)).to(x_1.device)
     return cft_loss_function(x_0, x_1, t, m, model, sampler)
 
 
@@ -85,7 +82,5 @@ def cft_loss_function(
     out = model(x_t, t)
     diff = out - target
     loss = m.square_norm_at(x_t, diff)
-    # if product space
-    if len(loss.shape) == 3:
-        loss = loss.sum(dim=1)
+    loss = loss.sum(dim=1)
     return loss.mean()

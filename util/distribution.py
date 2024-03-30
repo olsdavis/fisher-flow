@@ -64,6 +64,6 @@ def estimate_categorical_kl(points: Tensor, real_dist: Tensor) -> float:
     """
     cat = Categorical(points)
     samples = cat.sample()
-    samples = torch.nn.functional.one_hot(samples, num_classes=points.size(-1))
+    samples = torch.nn.functional.one_hot(samples, num_classes=points.size(-1)).float()
     emp_dist = samples.mean(dim=0)
-    return emp_dist * (emp_dist.log() - real_dist.log()).sum()
+    return (emp_dist * (emp_dist.log() - real_dist.log())).sum().item()
