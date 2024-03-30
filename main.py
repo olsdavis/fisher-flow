@@ -1,7 +1,6 @@
 """Entry point."""
 import argparse
 from experiment import run_dfm_toy_experiment
-from util import define_style
 
 
 def main():
@@ -17,9 +16,7 @@ def main():
     }
     experiment = experiments_available["dfm_toy"]
     # if experiment found
-    define_style()
     experiment(args)
-
 
 
 if __name__ == "__main__":
