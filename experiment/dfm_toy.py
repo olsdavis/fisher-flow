@@ -1,4 +1,5 @@
 """We define here an experiment analogous to that found in the DFM paper."""
+from argparse import Namespace
 import torch
 from torch import Tensor, nn
 from torch.distributions.categorical import Categorical
@@ -6,6 +7,7 @@ from torch.utils.data import Dataset, DataLoader, TensorDataset
 import numpy as np
 import matplotlib.pyplot as plt
 from torch.optim.lr_scheduler import CosineAnnealingLR
+import wandb
 from util import (
     MLP,
     ProductMLP,
@@ -49,12 +51,16 @@ def label_smoothing(one_hot_labels, smoothing=0.98):
     return smooth_labels
 
 
-def _generate_dataset(probas: Tensor, n_train: int, n_test: int) -> tuple[Dataset, Dataset]:
+def _generate_raw_tensor(probas: Tensor, n: int) -> Tensor:
     dist = Categorical(probas)
-    x_train = torch.nn.functional.one_hot(dist.sample((n_train,)), probas.size(-1))
-    x_train = label_smoothing(x_train)
-    x_test = torch.nn.functional.one_hot(dist.sample((n_test,)), probas.size(-1))
-    x_test = label_smoothing(x_test)
+    x = torch.nn.functional.one_hot(dist.sample((n,)), probas.size(-1))
+    x = label_smoothing(x)
+    return x
+
+
+def _generate_dataset(probas: Tensor, n_train: int, n_test: int) -> tuple[Dataset, Dataset]:
+    x_train = _generate_raw_tensor(probas, n_train)
+    x_test = _generate_raw_tensor(probas, n_test)
     return TensorDataset(x_train), TensorDataset(x_test)
 
 
@@ -65,6 +71,7 @@ def train(
     model_name: str,
     train_loader: DataLoader,
     test_loader: DataLoader,
+    wasserstein_set: Tensor,
     train_method: str,
     wasserstein_every: int = 10,
     plot_run: bool = False,
@@ -84,14 +91,14 @@ def train(
         if epoch % wasserstein_every == 0:
             model.eval()
             with torch.no_grad():
-                shape = test_loader.dataset.tensors[0].shape
+                shape = wasserstein_set.shape
                 n = shape[0]
                 k = shape[1]
                 d = shape[2]
                 final_traj = manifold.tangent_euler(generate_dirichlet_product(n, k, d).to(device), model, 100)
-                test = torch.cat(test_loader.dataset.tensors).to(device)
-                w2 = manifold.wasserstein_dist(test, final_traj, power=2)
+                w2 = manifold.wasserstein_dist(wasserstein_set, final_traj, power=2)
                 w2s.append(w2)
+            wandb.log({"w2": w2s[-1]})
             print(f"--- Epoch {epoch+1:03d}/{epochs:03d}: W2 distance = {w2:.5f}")
 
         # Training
@@ -129,6 +136,7 @@ def train(
         per_epoch_test += [np.mean(test_loss)]
         print(f"--- Epoch {epoch+1:03d}/{epochs:03d}: train loss = {per_epoch_train[-1]:.5f};"\
               f" test loss = {per_epoch_test[-1]:.5f}")
+        wandb.log({"train_loss": per_epoch_train[-1], "test_loss": per_epoch_test[-1]})
     if plot_run:
         plt.plot(np.arange(1, epochs+1), per_epoch_train, label="Train")
         plt.plot(np.arange(1, epochs+1), per_epoch_test, label="Test")
@@ -146,15 +154,23 @@ def train(
     return model
 
 
-def run_dfm_toy_experiment():
+def run_dfm_toy_experiment(args: Namespace):
+    wandb.init(
+        project="simplex-flow-matching",
+        config={
+            "architecture": "ProductMLP",
+            "dataset": "toy_dfm",
+        },
+    )
     seq_len = 4
     kls = []
     mx = 160
-    epochs = 1000
+    epochs = 400
     for d in range(20, mx+1, 20):
         set_seeds()
         real_probas = torch.softmax(torch.rand((seq_len, d)), dim=-1).to(device)
         train_dataset, test_dataset = _generate_dataset(real_probas, 10000, 1000)
+        wasserstein_set = _generate_raw_tensor(real_probas, 2500).to(device)
         train_loader = DataLoader(train_dataset, batch_size=512, shuffle=True)
         test_loader = DataLoader(test_dataset, batch_size=512, shuffle=False)
         print(f"---=== {real_probas.size(-1)}-simplices ===---")
@@ -163,7 +179,7 @@ def run_dfm_toy_experiment():
             # MLP(3, 4, 128, activation="relu"),
             ProductMLP(d, seq_len, 128, 4, activation="gelu"),
             # TembMLP(d, seq_len, hidden_layers=4),
-            "ProductMLP OT-CFT", train_loader, test_loader, "ot-cft",
+            "ProductMLP OT-CFT", train_loader, test_loader, wasserstein_set, "ot-cft",
         )
         # sample lots of points
         with torch.no_grad():

@@ -14,3 +14,4 @@ dependencies:
     - POT==0.9.3
     - dirichlet==0.9
     - einops==0.7.0
+    - wandb==0.16.5
