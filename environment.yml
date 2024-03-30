@@ -1,0 +1,15 @@
+name: sfm
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.10
+  - conda
+  - pip
+  - pytorch=2.1.0
+  - matplotlib=3.7.1
+  - seaborn=0.12.2
+  - pip:
+    - POT==0.9.3
+    - dirichlet==0.9
+    - einops==0.7.0
