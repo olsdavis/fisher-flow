@@ -99,7 +99,7 @@ class Manifold(ABC):
         x_0: Tensor,
         model: nn.Module,
         steps: int,
-    ) -> list[Tensor]:
+    ) -> Tensor:
         """
         Applies Euler integration on the manifold for the field defined
         by `model`.

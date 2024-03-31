@@ -41,7 +41,7 @@ class MLP(nn.Module):
         act = str_to_activation(activation)
         self.simplex_tangent = simplex_tangent
 
-        net = []
+        net: list[nn.Module] = []
         for i in range(depth):
             out = hidden
             if i == depth - 1:
@@ -97,8 +97,8 @@ class ProductMLP(nn.Module):
         """
         super().__init__()
         self.simplex_tangent = simplex_tangent
-        activation = str_to_activation(activation)
-        net = []
+        act = str_to_activation(activation)
+        net: list[nn.Module] = []
         for i in range(depth):
             net += [
                 nn.Linear(
@@ -108,18 +108,18 @@ class ProductMLP(nn.Module):
                 )
             ]
             if i < depth - 1:
-                net += [activation]
+                net += [act]
         self.net = nn.Sequential(*net)
 
     def forward(self, x: Tensor, t: Tensor) -> Tensor:
         """
         Applies the MLP to the input `(x, t)`.
         """
-        final_shape = list(x.shape)
+        shape = list(x.shape)
         # remove one dimension if tangent space
         if self.simplex_tangent:
-            final_shape[-1] = final_shape[-1] - 1
-        final_shape = tuple(final_shape)
+            shape[-1] = shape[-1] - 1
+        final_shape = tuple(shape)
         x = x.view((x.size(0), -1))
         # run
         out = self.net(torch.cat([x, t], dim=-1))
@@ -206,7 +206,7 @@ class PositionalEmbedding(nn.Module):
         super().__init__()
 
         if type == "sinusoidal":
-            self.layer = SinusoidalEmbedding(size, **kwargs)
+            self.layer: nn.Module = SinusoidalEmbedding(size, **kwargs)
         elif type == "linear":
             self.layer = LinearEmbedding(size, **kwargs)
         elif type == "learnable":
@@ -280,7 +280,7 @@ class TembMLP(nn.Module):
             map(lambda x: len(x.layer), positional_embeddings)
         )
 
-        layers = [nn.Linear(concat_size, hidden_size)]
+        layers: list[nn.Module] = [nn.Linear(concat_size, hidden_size)]
         for _ in range(hidden_layers):
             layers.append(Block(hidden_size, emb_size, add_t_emb, concat_t_emb))
 

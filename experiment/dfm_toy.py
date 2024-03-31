@@ -1,5 +1,5 @@
 """We define here an experiment analogous to that found in the DFM paper."""
-from argparse import Namespace
+from typing import Any
 import torch
 from torch import Tensor, nn
 from torch.distributions import Categorical, Dirichlet
@@ -41,7 +41,7 @@ def label_smoothing(one_hot_labels: Tensor, smoothing: float = 0.98) -> Tensor:
     num_classes = one_hot_labels.size(-1)
 
     # Value to be added to each non-target class
-    increase = torch.tensor((1.0 - smoothing) / (num_classes - 1))
+    increase = (1.0 - smoothing) / (num_classes - 1)
 
     # Create a tensor with all elements set to the increase value
     smooth_labels = torch.full_like(one_hot_labels.float(), increase)
@@ -138,7 +138,7 @@ def train(
     return model
 
 
-def run_dfm_toy_experiment(args: dict[str, any]):
+def run_dfm_toy_experiment(args: dict[str, Any]):
     kls = []
     seq_len = 4
     epochs = 300
@@ -194,7 +194,4 @@ def run_dfm_toy_experiment(args: dict[str, any]):
 
         # log that single value
         wandb.log({"kl": kls[-1]})
-
-
-if __name__ == "__main__":
-    run_dfm_toy_experiment()
+        wandb.finish()
