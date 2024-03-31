@@ -26,6 +26,7 @@ def main():
     parser.add_argument("--train_method", default="ot-cft", type=str, choices=training_methods)
     # Where is the config for the model?
     parser.add_argument("--config", "-c", type=str)
+    parser.add_argument("--wandb", action="store_true")
     args = vars(parser.parse_args())
     print(args)
 

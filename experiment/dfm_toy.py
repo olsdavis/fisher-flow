@@ -76,6 +76,7 @@ def train(
     train_method: str,
     wasserstein_every: int = 10,
     inference_steps: int = 100,
+    args: dict[str, Any] = {},
 ) -> nn.Module:
     print(f"===== {model} / {train_method}")
     set_seeds()
@@ -137,7 +138,8 @@ def train(
         logs["test_loss"] = np.mean(test_loss)
         print(f"--- Epoch {epoch+1:03d}/{epochs:03d}: train loss = {np.mean(train_loss):.5f};"\
               f" test loss = {np.mean(test_loss):.5f}")
-        wandb.log(logs)
+        if args["wandb"]:
+            wandb.log(logs)
     return model
 
 
@@ -152,14 +154,15 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
     ds = [5, 10, 20, 40, 60, 80, 100, 120, 140, 160]
     model_config = load_model_config(args["config"])
     for d in ds:
-        wandb.init(
-            project="simplex-flow-matching",
-            name=f"toy_dfm_{d}",
-            config={
-                "architecture": "ProductMLP",
-                "dataset": "toy_dfm",
-            },
-        )
+        if args["wandb"]:
+            wandb.init(
+                project="simplex-flow-matching",
+                name=f"toy_dfm_{d}",
+                config={
+                    "architecture": "ProductMLP",
+                    "dataset": "toy_dfm",
+                },
+            )
         set_seeds()
 
         # generate data
@@ -186,6 +189,7 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
             wasserstein_set,
             train_method=args["train_method"],
             inference_steps=args["inference_steps"],
+            args=args,
         )
 
         # evaluate KL

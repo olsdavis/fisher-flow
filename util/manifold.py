@@ -206,7 +206,7 @@ class NSimplex(Manifold):
         See `Manifold.exp_map`.
         """
         s = p.sqrt()
-        xs = v / (s + 1e-7) / 2.0
+        xs = v / s / 2.0
         theta = xs.norm(dim=-1, keepdim=True)
         return (theta.cos() * s + usinc(theta) * xs).square()
 
@@ -219,7 +219,7 @@ class NSimplex(Manifold):
         dist = 2.0 * torch.arccos(dot)
         denom = (1.0 - dot ** 2).sqrt()
         fact = rt_prod - dot * p
-        return (dist / (denom + 1e-7)) * fact
+        return (dist / (denom)) * fact
 
     def geodesic_distance(self, p: Tensor, q: Tensor) -> Tensor:
         """
@@ -232,9 +232,9 @@ class NSimplex(Manifold):
         """
         See `Manifold.metric`.
         """
-        eps = 1e-7
-        div = x.sqrt() + eps
-        return ((u / div).abs().clamp(eps, 1e8) * (v / div).abs().clamp(eps, 1e8)).sum(dim=-1, keepdim=True)
+        # can just ignore points that have some zero coordinates
+        # ie on the boundary; doesn't work with mask (changes shape)
+        return ((u * v) / x).sum(dim=-1, keepdim=True)
 
     def _sphere_map(self, p: Tensor):
         """
@@ -252,7 +252,7 @@ class NSimplex(Manifold):
         y_s = sphere.parallel_transport(
             self._sphere_map(p),
             q_s,
-            v / (p.sqrt() + 1e-7),
+            v / p.sqrt(),
         )
         return y_s * q_s
 
@@ -282,5 +282,5 @@ class NSphere(Manifold):
         """
         m = p + q
         mnorm2 = m.square().sum(dim=-1, keepdim=True)
-        factor = 2.0 * (v * q).sum(dim=-1, keepdim=True) / (mnorm2 + 1e-7)
+        factor = 2.0 * (v * q).sum(dim=-1, keepdim=True) / (mnorm2)
         return v - m * factor
