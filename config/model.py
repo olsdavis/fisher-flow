@@ -30,17 +30,29 @@ def load_model_config(path: str) -> ModelConfig:
     return ModelConfig(**_load_config_raw(path))
 
 
-def model_from_config(k: int, dim: int, config: ModelConfig) -> nn.Module:
+def model_from_config(
+    k: int,
+    dim: int,
+    simplex_tangent: bool,
+    config: ModelConfig,
+) -> nn.Module:
     """
     Creates a model from the provided arguments.
 
     Parameters:
         - `k`: the number of spaces in the product;
         - `dim`: the dimension in each space;
+        - `simplex_tangent`: whether the model should output points on the
+            tangent space of the simplex;
         - `config`: the config itself.
     """
     models_available = {
         "ProductMLP": ProductMLP,
         "TembMLP": TembMLP,
     }
-    return models_available[config.name](k=k, dim=dim, **asdict(config))
+    return models_available[config.name](
+        k=k,
+        dim=dim,
+        simplex_tangent=simplex_tangent,
+        **asdict(config),
+    )

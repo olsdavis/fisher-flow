@@ -4,8 +4,8 @@ import torch
 from torch import Tensor, nn
 from torch.distributions import Categorical, Dirichlet
 from torch.utils.data import Dataset, DataLoader, TensorDataset
+from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingLR
 import numpy as np
-from torch.optim.lr_scheduler import ReduceLROnPlateau
 import wandb
 from config import (
     load_model_config,
@@ -49,7 +49,7 @@ def label_smoothing(one_hot_labels: Tensor, smoothing: float = 0.98) -> Tensor:
 
     # Set the target classes to the smoothing value
     smooth_labels[one_hot_labels == 1] = smoothing
-    
+
     return smooth_labels
 
 
@@ -83,7 +83,8 @@ def train(
     manifold = NSimplex()
     ot_sampler = OTSampler(manifold, "exact")
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    lr_scheduler = ReduceLROnPlateau(optimizer)
+    # lr_scheduler = ReduceLROnPlateau(optimizer)
+    lr_scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-5)
     for epoch in range(epochs):
         logs = {}
         # Wasserstein eval
@@ -116,7 +117,8 @@ def train(
             optimizer.step()
             train_loss += [loss.item()]
         logs["train_loss"] = np.mean(train_loss)
-        lr_scheduler.step(logs["train_loss"])
+        lr_scheduler.step()
+        # lr_scheduler.step(logs["train_loss"])
 
         # test loss
         test_loss = []
@@ -165,15 +167,20 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
         real_probas = torch.softmax(torch.rand((seq_len, d)), dim=-1).to(device)
         train_dataset, test_dataset = _generate_dataset(real_probas, 10000, 1000)
         wasserstein_set = _generate_raw_tensor(real_probas, 512).to(device)
-        train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
-        test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False)
+        train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+        test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
         # start
         print(f"---=== {d}-simplices ===---")
         trained = train(
             epochs,
             lr,
-            model_from_config(k=seq_len, dim=d, config=model_config),
+            model_from_config(
+                k=seq_len,
+                dim=d,
+                simplex_tangent=args["train_method"] == "ot-cft",
+                config=model_config,
+            ),
             train_loader,
             test_loader,
             wasserstein_set,

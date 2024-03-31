@@ -51,7 +51,7 @@ class MLP(nn.Module):
                     out = dim
             net += [
                 nn.Linear(
-                    # +1 for time 
+                    # +1 for time
                     dim + 1 if i == 0 else hidden,
                     out,
                 )
