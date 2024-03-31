@@ -1,0 +1,4 @@
+name: ProductMLP
+depth: 4
+hidden: 128
+activation: lrelu

@@ -14,9 +14,9 @@ class ModelConfig:
     depth: int
     hidden: int
     activation: str
-    emb_size: int | None
-    time_emb: str | None
-    input_emb: str | None
+    emb_size: int | None = 64
+    time_emb: str | None = "sinusoidal"
+    input_emb: str | None = "sinusoidal"
     add_t_emb: bool | None = False
     concat_t_emb: bool | None = False
     # simplex_tangent is not here, as it is defined by the training method

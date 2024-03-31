@@ -84,6 +84,7 @@ class ProductMLP(nn.Module):
         depth: int,
         simplex_tangent: bool = True,
         activation: str = "relu",
+        **_,
     ):
         """
         Parameters:
@@ -94,6 +95,8 @@ class ProductMLP(nn.Module):
             - `simplex_tangent`: when `True` makes the point output constrained
             to the tangent space of the simplex, i.e., `x: 1^T x = 0`;
             - `activation`: the activation function.
+
+        Other arguments are ignored.
         """
         super().__init__()
         self.simplex_tangent = simplex_tangent
@@ -351,7 +354,7 @@ class TembMLP(nn.Module):
             - `simplex_tangent`: whether the model should output values in the tangent
                 space of the simplex.
 
-        Other parameters are ignored.
+        Other arguments are ignored.
         """
         super().__init__()
         self.add_t_emb = add_t_emb
