@@ -2,7 +2,7 @@
 from typing import Any
 import torch
 from torch import Tensor, nn
-from torch.distributions import Categorical, Dirichlet
+from torch.distributions import Categorical, Dirichlet, MultivariateNormal
 from torch.utils.data import Dataset, DataLoader, TensorDataset
 from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingLR
 import numpy as np
@@ -13,6 +13,7 @@ from config import (
 )
 from util import (
     NSimplex,
+    NSphere,
     OTSampler,
     dfm_train_step,
     estimate_categorical_kl,
@@ -81,7 +82,7 @@ def train(
     print(f"===== {model} / {train_method}")
     set_seeds()
     model = model.to(device)
-    manifold = NSimplex()
+    manifold = NSimplex() if args["manifold"] == "simplex" else NSphere()
     ot_sampler = OTSampler(manifold, "exact")
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     # lr_scheduler = ReduceLROnPlateau(optimizer)
@@ -96,7 +97,13 @@ def train(
                 n = shape[0]
                 k = shape[1]
                 d = shape[2]
-                x_0 = Dirichlet(torch.ones(k, d)).sample((n,)).to(device)
+                if args["manifold"] == "sphere":
+                    # uniform on positive orthant
+                    x_0 = torch.randn((n, k, d)).to(device)
+                    x_0 = x_0 / x_0.norm(dim=-1, keepdim=True)
+                    x_0 = x_0.abs()
+                else:
+                    x_0 = Dirichlet(torch.ones(k, d)).sample((n,)).to(device)
                 final_traj = manifold.tangent_euler(x_0, model, inference_steps)
                 w2 = manifold.wasserstein_dist(wasserstein_set, final_traj, power=2)
             logs["w2"] = w2
@@ -108,6 +115,7 @@ def train(
         for x in train_loader:
             x = x[0]
             x = x.to(device)
+            # x is one-hot encoded so fixed-point of either sphere-map or inverse
             optimizer.zero_grad()
             if train_method == "ot-cft":
                 loss = ot_train_step(x, manifold, model, ot_sampler)
@@ -170,6 +178,8 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
         real_probas = torch.softmax(torch.rand((seq_len, d)), dim=-1).to(device)
         train_dataset, test_dataset = _generate_dataset(real_probas, 10000, 1000)
         wasserstein_set = _generate_raw_tensor(real_probas, 512).to(device)
+        if args["manifold"] == "sphere":
+            wasserstein_set = NSimplex().sphere_map(wasserstein_set)
         train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
         test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
@@ -196,6 +206,7 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
         kls += [
             estimate_categorical_kl(
                 trained,
+                NSimplex() if args["manifold"] == "simplex" else NSphere(),
                 Dirichlet(torch.ones_like(real_probas)),  # uniform
                 real_probas,
                 n=args["kl_points"],
@@ -210,5 +221,6 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
         print(f"KL {kls[-1]:.5f}")
 
         # log that single value
-        wandb.log({"kl": kls[-1]})
-        wandb.finish()
+        if args["wandb"]:
+            wandb.log({"kl": kls[-1]})
+            wandb.finish()

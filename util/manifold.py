@@ -109,7 +109,7 @@ class Manifold(ABC):
         t = torch.full((x.size(0), 1), dt, device=x_0.device)
         for _ in range(steps):
             t += dt
-            x = self.exp_map(x, model(x, t) * dt)
+            x = self.exp_map(x, self.make_tangent(x, model(x, t)) * dt)
         return x
 
     def pairwise_geodesic_distance(
@@ -193,6 +193,13 @@ class Manifold(ABC):
             - `v`: the vector to transport.
         """
 
+    @abstractmethod
+    def make_tangent(self, p: Tensor, v: Tensor) -> Tensor:
+        """
+        For an incomplete vector `v`, i.e., of shape `(b, k, d - 1)`,
+        complete each coordinate to make it tangent at `p`.
+        """
+
 
 class NSimplex(Manifold):
     """
@@ -236,11 +243,17 @@ class NSimplex(Manifold):
         # ie on the boundary; doesn't work with mask (changes shape)
         return ((u * v) / x).sum(dim=-1, keepdim=True)
 
-    def _sphere_map(self, p: Tensor):
+    def sphere_map(self, p: Tensor):
         """
         Maps `p` to the positive orthant of the sphere.
         """
         return p.sqrt()
+
+    def inv_sphere_map(self, p: Tensor):
+        """
+        Maps `p` from the positive orthant of the sphere to the simplex.
+        """
+        return p.square()
 
     def parallel_transport(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
         """
@@ -248,13 +261,23 @@ class NSimplex(Manifold):
         `NSphere`.
         """
         sphere = NSphere()
-        q_s = self._sphere_map(q)
+        q_s = self.sphere_map(q)
         y_s = sphere.parallel_transport(
-            self._sphere_map(p),
+            self.sphere_map(p),
             q_s,
             v / p.sqrt(),
         )
         return y_s * q_s
+    
+    def make_tangent(self, p: Tensor, v: Tensor) -> Tensor:
+        """
+        See `Manifold.make_tangent`.
+
+        TODO Check if the tangent plane is indeed independent of the point,
+        in the simplex.
+        """
+        s = v.sum(dim=-1, keepdim=True)
+        return torch.cat([v, -s], dim=-1)
 
 
 class NSphere(Manifold):
@@ -265,16 +288,46 @@ class NSphere(Manifold):
     """
 
     def exp_map(self, p: Tensor, v: Tensor) -> Tensor:
-        raise NotImplementedError()
+        """
+        See `Manifold.exp_map`.
+        """
+        theta = self.square_norm_at(p, v).sqrt()
+        return theta.cos() * p + usinc(theta) * v
 
     def log_map(self, p: Tensor, q: Tensor) -> Tensor:
-        raise NotImplementedError()
+        """
+        See `Manifold.log_map`.
+        """
+        cos = torch.clamp((p * q).sum(dim=-1, keepdim=True), -1.0, 1.0)
+        # do not need to handle properly case where cos approx -1
+        # since we are on the positive orthant of the sphere
+        theta = safe_arccos(cos)
+        return (q - cos * p) / usinc(theta)
 
     def geodesic_distance(self, p: Tensor, q: Tensor) -> Tensor:
-        raise NotImplementedError()
+        """
+        See `Manifold.geodesic_distance`.
+        """
+        cos = (p * q).sum(dim=-1)
+        # sum across product space
+        """
+        Safe version:
+        return torch.where(
+            (cos.abs() - 1.0).abs() < 1e-6,
+            2.0 * torch.atan2(
+                (p - q).norm(dim=-1),
+                (p + q).norm(dim=-1),
+            ).abs(),
+            safe_arccos(cos),
+        ).sum(dim=1)
+        """
+        return safe_arccos(cos).sum(dim=1)
 
     def metric(self, x: Tensor, u: Tensor, v: Tensor) -> Tensor:
-        raise NotImplementedError()
+        """
+        See `Manifold.metric`.
+        """
+        return (u * v).sum(dim=-1, keepdim=True)
 
     def parallel_transport(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
         """
@@ -282,5 +335,15 @@ class NSphere(Manifold):
         """
         m = p + q
         mnorm2 = m.square().sum(dim=-1, keepdim=True)
-        factor = 2.0 * (v * q).sum(dim=-1, keepdim=True) / (mnorm2)
+        factor = 2.0 * (v * q).sum(dim=-1, keepdim=True) / mnorm2
         return v - m * factor
+
+    def make_tangent(self, p: Tensor, v: Tensor) -> Tensor:
+        """
+        See `Manifold.make_tangent`.
+        """
+        # dot of all but last
+        curr = (p[:, :, :-1] * v).sum(dim=-1, keepdim=True)
+        # last coordinate must be -(curr) / p_n
+        last = -(curr / p[:, :, -1].unsqueeze(-1))
+        return torch.cat([v, last], dim=-1)

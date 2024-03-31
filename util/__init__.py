@@ -6,6 +6,7 @@ from .maths import (
 from .manifold import (
     Manifold,
     NSimplex,
+    NSphere,
     str_to_ot_method,
 )
 from .distribution import (

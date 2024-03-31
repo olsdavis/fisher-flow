@@ -25,7 +25,7 @@ class MLP(nn.Module):
         dim: int,
         depth: int,
         hidden: int,
-        simplex_tangent: bool = True,
+        tangent: bool = True,
         activation: str = "relu",
     ):
         """
@@ -33,19 +33,18 @@ class MLP(nn.Module):
             - `dim`: the dimension of the input and output;
             - `depth`: the depth of the network;
             - `hidden`: the size of hidden features;
-            - `simplex_tangent`: when `True` makes the point output constrained
-            to the tangent space of the simplex, i.e., `x: 1^T x = 0`;
+            - `tangent`: when `True` makes the point output constrained
+            to the tangent space of the manifold;
             - `activation`: the activation function to use.
         """
         super().__init__()
         act = str_to_activation(activation)
-        self.simplex_tangent = simplex_tangent
 
         net: list[nn.Module] = []
         for i in range(depth):
             out = hidden
             if i == depth - 1:
-                if simplex_tangent:
+                if tangent:
                     out = dim - 1
                 else:
                     out = dim
@@ -64,11 +63,7 @@ class MLP(nn.Module):
         """
         Applies the MLP to the input `(x, t)`.
         """
-        out = self.net(torch.cat([x, t], dim=-1))
-        if self.simplex_tangent:
-            x_3 = -out.sum(dim=-1, keepdim=True)
-            return torch.cat([out, x_3], dim=-1)
-        return out
+        return self.net(torch.cat([x, t], dim=-1))
 
 
 class ProductMLP(nn.Module):
@@ -82,7 +77,7 @@ class ProductMLP(nn.Module):
         k: int,
         hidden: int,
         depth: int,
-        simplex_tangent: bool = True,
+        tangent: bool = True,
         activation: str = "relu",
         **_,
     ):
@@ -92,14 +87,14 @@ class ProductMLP(nn.Module):
             - `k`: the number of simplices in the product;
             - `hidden`: the hidden dimension;
             - `depth`: the depth of the network;
-            - `simplex_tangent`: when `True` makes the point output constrained
-            to the tangent space of the simplex, i.e., `x: 1^T x = 0`;
+            - `tangent`: when `True` makes the point output constrained
+            to the tangent space of the manifold;
             - `activation`: the activation function.
 
         Other arguments are ignored.
         """
         super().__init__()
-        self.simplex_tangent = simplex_tangent
+        self.tangent = tangent
         act = str_to_activation(activation)
         net: list[nn.Module] = []
         for i in range(depth):
@@ -107,7 +102,7 @@ class ProductMLP(nn.Module):
                 nn.Linear(
                     k * dim + 1 if i == 0 else hidden,
                     hidden if i < depth - 1 else
-                        k * (dim - 1 if simplex_tangent else dim),
+                        k * (dim - 1 if tangent else dim),
                 )
             ]
             if i < depth - 1:
@@ -120,16 +115,13 @@ class ProductMLP(nn.Module):
         """
         shape = list(x.shape)
         # remove one dimension if tangent space
-        if self.simplex_tangent:
+        if self.tangent:
             shape[-1] = shape[-1] - 1
         final_shape = tuple(shape)
         x = x.view((x.size(0), -1))
         # run
         out = self.net(torch.cat([x, t], dim=-1))
         out = out.reshape(final_shape)
-        if self.simplex_tangent:
-            x_3 = -out.sum(dim=-1, keepdim=True)
-            return torch.cat([out, x_3], dim=-1)
         return out
 
 
@@ -337,7 +329,7 @@ class TembMLP(nn.Module):
         add_t_emb: bool = False,
         concat_t_emb: bool = False,
         activation: str = "gelu",
-        simplex_tangent: bool = True,
+        tangent: bool = True,
         **_,
     ):
         """
@@ -351,15 +343,15 @@ class TembMLP(nn.Module):
             - `add_t_emb`: if the time embedding should be residually added;
             - `concat_t_emb`: if the time embedding should be concatenated;
             - `activation`: the activation function to use;
-            - `simplex_tangent`: whether the model should output values in the tangent
-                space of the simplex.
+            - `tangent`: whether the model should output values in the tangent
+                space of the manifold.
 
         Other arguments are ignored.
         """
         super().__init__()
         self.add_t_emb = add_t_emb
         self.concat_t_emb = concat_t_emb
-        self.simplex_tangent = simplex_tangent
+        self.tangent = tangent
         self.activation = str_to_activation(activation)
         self.time_mlp = PositionalEmbedding(emb_size, time_emb)
         positional_embeddings = []
@@ -377,7 +369,7 @@ class TembMLP(nn.Module):
             layers.append(TembBlock(hidden, activation, emb_size, add_t_emb, concat_t_emb))
 
         in_size = emb_size + hidden if concat_t_emb else hidden
-        layers.append(nn.Linear(in_size, k * (dim - 1) if simplex_tangent else k * dim))
+        layers.append(nn.Linear(in_size, k * (dim - 1) if tangent else k * dim))
 
         self.layers = layers
         self.joint_mlp = nn.Sequential(*layers)
@@ -387,7 +379,7 @@ class TembMLP(nn.Module):
         Applies the model to input `(x, t)`.
         """
         shape = list(x.shape)
-        if self.simplex_tangent:
+        if self.tangent:
             shape[-1] -= 1
         final_shape = tuple(shape)
 
@@ -413,9 +405,4 @@ class TembMLP(nn.Module):
             else:
                 x = layer(x, t_emb)
         x = x.view(final_shape)
-
-        # simplex tangent space
-        if self.simplex_tangent:
-            x_last = -x.sum(dim=-1, keepdim=True)
-            return torch.cat([x, x_last], dim=-1)
         return x

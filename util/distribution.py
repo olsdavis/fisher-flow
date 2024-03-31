@@ -4,7 +4,7 @@ import torch
 from torch import Tensor, nn
 from torch.distributions.dirichlet import Dirichlet
 import numpy as np
-from util import NSimplex
+from util import Manifold, NSimplex, NSphere
 
 
 def set_seeds(seed: int = 0):
@@ -19,6 +19,7 @@ def set_seeds(seed: int = 0):
 @torch.no_grad()
 def estimate_categorical_kl(
     model: nn.Module,
+    manifold: Manifold,
     prior: Dirichlet,
     real_dist: Tensor,
     n: int,
@@ -33,6 +34,7 @@ def estimate_categorical_kl(
 
     Parameters:
         - `model`: the model;
+        - `manifold`: manifold over which the model was trained;
         - `prior`: the prior distribution to generate points from for `model`;
         - `real_dist`: the real distribution tensor of shape `(k, d)`;
         - `n`: the number of points over which the estimate should be done;
@@ -57,7 +59,11 @@ def estimate_categorical_kl(
     while to_draw > 0:
         draw = min(batch, to_draw)
         x_0 = prior.sample((draw,)).to(real_dist.device)
+        if isinstance(manifold, NSphere):
+            x_0 = NSimplex().sphere_map(x_0)
         x_1 = simplex.tangent_euler(x_0, model, inference_steps)
+        if isinstance(manifold, NSphere):
+            x_1 = NSimplex().inv_sphere_map(x_1)
         if sampling_mode == "sample":
             dist = Dirichlet(x_1)
             samples = dist.sample()

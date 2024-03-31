@@ -2,7 +2,7 @@
 import torch
 from torch.distributions.dirichlet import Dirichlet
 from torch import Tensor, nn
-from util import Manifold, OTSampler
+from util import Manifold, NSimplex, NSphere, OTSampler
 
 
 def dfm_train_step(
@@ -47,7 +47,13 @@ def ot_train_step(
     k = x_1.size(1)
     d = x_1.size(-1)
     t = torch.rand((b, 1), device=x_1.device) * (1.0 - time_eps)
-    x_0 = Dirichlet(torch.ones(k, d)).sample((b,)).to(x_1.device)
+    if isinstance(m, NSphere):
+        # uniform on positive orthant
+        x_0 = torch.randn((b, k, d)).to(x_1.device)
+        x_0 = x_0 / x_0.norm(dim=-1, keepdim=True)
+        x_0 = x_0.abs()
+    else:
+        x_0 = Dirichlet(torch.ones(k, d)).sample((b,)).to(x_1.device)
     return cft_loss_function(x_0, x_1, t, m, model, sampler)
 
 
@@ -79,6 +85,7 @@ def cft_loss_function(
     target = m.log_map(x_0, x_1)
     target = m.parallel_transport(x_0, x_t, target)
     out = model(x_t, t)
+    out = m.make_tangent(x_t, out)
     diff = out - target
     loss = m.square_norm_at(x_t, diff)
     loss = loss.sum(dim=1)
