@@ -130,16 +130,25 @@ class ProductMLP(nn.Module):
         return out
 
 
-# Old code:
-
-
 class SinusoidalEmbedding(nn.Module):
+    """
+    Sinusoidal embedding.
+    """
+
     def __init__(self, size: int, scale: float = 1.0):
+        """
+        Parameters:
+            - `size`: the size of the embedding;
+            - `scale`: the scale of factor to increase initially frequency.
+        """
         super().__init__()
         self.size = size
         self.scale = scale
 
     def forward(self, x: Tensor) -> Tensor:
+        """
+        Applies the sinusoidal embeddeing to `x`.
+        """
         x = x * self.scale
         half_size = self.size // 2
         emb = torch.log(torch.Tensor([10000.0]).to(x.device)) / (half_size - 1)
@@ -153,12 +162,24 @@ class SinusoidalEmbedding(nn.Module):
 
 
 class LinearEmbedding(nn.Module):
+    """
+    Applies a linear scaling to the input.
+    """
+
     def __init__(self, size: int, scale: float = 1.0):
+        """
+        Parameters:
+            - `size`: the size of the input;
+            - `scale`: the scale factor.
+        """
         super().__init__()
         self.size = size
         self.scale = scale
 
     def forward(self, x: Tensor) -> Tensor:
+        """
+        Scales `x` with an extra dimension at the end.
+        """
         x = x / self.size * self.scale
         return x.unsqueeze(-1)
 
@@ -167,12 +188,23 @@ class LinearEmbedding(nn.Module):
 
 
 class LearnableEmbedding(nn.Module):
+    """
+    A learnable linear embedding.
+    """
+
     def __init__(self, size: int):
+        """
+        Paramters:
+            - `size`: the size of the learnt embedding.
+        """
         super().__init__()
         self.size = size
         self.linear = nn.Linear(1, size)
 
     def forward(self, x: Tensor) -> Tensor:
+        """
+        Applies the learnt embedding to `x`.
+        """
         return self.linear(x.unsqueeze(-1).float() / self.size)
 
     def __len__(self) -> int:
@@ -180,10 +212,17 @@ class LearnableEmbedding(nn.Module):
 
 
 class IdentityEmbedding(nn.Module):
+    """
+    Identity embedding.
+    """
+
     def __init__(self):
         super().__init__()
 
     def forward(self, x: Tensor) -> Tensor:
+        """
+        Returns `x` with an extra dimension at the end.
+        """
         return x.unsqueeze(-1)
 
     def __len__(self) -> int:
@@ -191,10 +230,15 @@ class IdentityEmbedding(nn.Module):
 
 
 class ZeroEmbedding(nn.Module):
+    """
+    Zero (trivial) embedding.
+    """
+
     def __init__(self):
         super().__init__()
 
     def forward(self, x: Tensor) -> Tensor:
+        """Returns zero."""
         return x.unsqueeze(-1) * 0
 
     def __len__(self):
@@ -202,98 +246,147 @@ class ZeroEmbedding(nn.Module):
 
 
 class PositionalEmbedding(nn.Module):
-    def __init__(self, size: int, type: str, **kwargs):
-        super().__init__()
+    """
+    Positional embedding for inputs.
+    """
 
-        if type == "sinusoidal":
+    def __init__(self, size: int, emb_type: str, **kwargs):
+        """
+        Parameters:
+            - `size`: the size of the input;
+            - `emb_type`: the type of embedding to use; either `sinusoidal`, `linear`,
+                `learnable`, `zero`, or `identity`;
+            - `**kwargs`: arguments for the specific embedding.
+        """
+        super().__init__()
+        if emb_type == "sinusoidal":
             self.layer: nn.Module = SinusoidalEmbedding(size, **kwargs)
-        elif type == "linear":
+        elif emb_type == "linear":
             self.layer = LinearEmbedding(size, **kwargs)
-        elif type == "learnable":
+        elif emb_type == "learnable":
             self.layer = LearnableEmbedding(size)
-        elif type == "zero":
+        elif emb_type == "zero":
             self.layer = ZeroEmbedding()
-        elif type == "identity":
+        elif emb_type == "identity":
             self.layer = IdentityEmbedding()
         else:
-            raise ValueError(f"Unknown positional embedding type: {type}")
+            raise ValueError(f"Unknown positional embedding type: {emb_type}")
 
     def forward(self, x: torch.Tensor):
+        """
+        Applies the positional embedding to `x`.
+        """
         return self.layer(x)
 
 
-class Block(nn.Module):
+class TembBlock(nn.Module):
+    """
+    A basic block for the `TembMLP`.
+    """
     def __init__(
-        self, size: int, t_emb_size: int = 0, add_t_emb=False, concat_t_emb=False
+        self,
+        size: int,
+        activation: str,
+        t_emb_size: int = 0,
+        add_t_emb: bool = False,
+        concat_t_emb: bool = False,
     ):
+        """
+        Parameters:
+            - `size`: the size of the input and output;
+            - `activation`: the activation function to use;
+            - `t_emb_size`: the size of the time embedding;
+            - `add_t_emb`: whether the time embeddings should be added residually;
+            - `concat_t_emb`: whether the time embeddings should be concatenated.
+        """
         super().__init__()
-
         in_size = size + t_emb_size if concat_t_emb else size
         self.ff = nn.Linear(in_size, size)
-        self.act = nn.GELU()
-
+        self.act = str_to_activation(activation)
         self.add_t_emb = add_t_emb
         self.concat_t_emb = concat_t_emb
 
     def forward(self, x: torch.Tensor, t_emb: torch.Tensor):
+        """
+        Applies the block to `(x, t)`.
+        """
         in_arg = torch.cat([x, t_emb], dim=-1) if self.concat_t_emb else x
         out = x + self.act(self.ff(in_arg))
-
         if self.add_t_emb:
             out = out + t_emb
-
         return out
 
 
 class TembMLP(nn.Module):
+    """
+    A more advanced MLP with time embeddings.
+    """
+
     def __init__(
         self,
         dim: int,
         k: int,
-        hidden_size: int = 128,
-        hidden_layers: int = 3,
+        hidden: int = 128,
+        depth: int = 3,
         emb_size: int = 128,
         time_emb: str = "sinusoidal",
         input_emb: str = "sinusoidal",
         add_t_emb: bool = False,
         concat_t_emb: bool = False,
-        energy_function=None,
+        activation: str = "gelu",
+        simplex_tangent: bool = True,
+        **_,
     ):
-        super().__init__()
+        """
+        Parameters:
+            - `dim`: dimension per space;
+            - `k`: spaces in product space;
+            - `hidden_size`: hidden features;
+            - `emb_size`: the size of the embedding;
+            - `time_emb`: the type of time embedding;
+            - `input_emb`: the type of input embedding;
+            - `add_t_emb`: if the time embedding should be residually added;
+            - `concat_t_emb`: if the time embedding should be concatenated;
+            - `activation`: the activation function to use;
+            - `simplex_tangent`: whether the model should output values in the tangent
+                space of the simplex.
 
+        Other parameters are ignored.
+        """
+        super().__init__()
         self.add_t_emb = add_t_emb
         self.concat_t_emb = concat_t_emb
-
+        self.simplex_tangent = simplex_tangent
+        self.activation = str_to_activation(activation)
         self.time_mlp = PositionalEmbedding(emb_size, time_emb)
-
         positional_embeddings = []
         for i in range(k * dim):
             embedding = PositionalEmbedding(emb_size, input_emb, scale=25.0)
-
             self.add_module(f"input_mlp{i}", embedding)
-
             positional_embeddings.append(embedding)
 
-        self.channels = 1
         self.self_condition = False
         concat_size = len(self.time_mlp.layer) + sum(
             map(lambda x: len(x.layer), positional_embeddings)
         )
+        layers: list[nn.Module] = [nn.Linear(concat_size, hidden)]
+        for _ in range(depth):
+            layers.append(TembBlock(hidden, activation, emb_size, add_t_emb, concat_t_emb))
 
-        layers: list[nn.Module] = [nn.Linear(concat_size, hidden_size)]
-        for _ in range(hidden_layers):
-            layers.append(Block(hidden_size, emb_size, add_t_emb, concat_t_emb))
-
-        in_size = emb_size + hidden_size if concat_t_emb else emb_size
-        layers.append(nn.Linear(in_size, k * (dim - 1)))
+        in_size = emb_size + hidden if concat_t_emb else hidden
+        layers.append(nn.Linear(in_size, k * (dim - 1) if simplex_tangent else k * dim))
 
         self.layers = layers
         self.joint_mlp = nn.Sequential(*layers)
 
-    def forward(self, x, t, x_self_cond=False):
-        final_shape = list(x.shape)
-        final_shape[-1] -= 1
-        final_shape = tuple(final_shape)
+    def forward(self, x: Tensor, t: Tensor) -> Tensor:
+        """
+        Applies the model to input `(x, t)`.
+        """
+        shape = list(x.shape)
+        if self.simplex_tangent:
+            shape[-1] -= 1
+        final_shape = tuple(shape)
 
         x = x.view((x.size(0), -1))
         positional_embs = [
@@ -305,18 +398,21 @@ class TembMLP(nn.Module):
 
         for i, layer in enumerate(self.layers):
             if i == 0:
-                x = nn.GELU()(layer(x))
+                x = self.activation(layer(x))
                 if self.add_t_emb:
                     x = x + t_emb
 
             elif i == len(self.layers) - 1:
                 if self.concat_t_emb:
                     x = torch.cat([x, t_emb], dim=-1)
-
                 x = layer(x)
 
             else:
                 x = layer(x, t_emb)
         x = x.view(final_shape)
-        x_last = -x.sum(dim=-1, keepdim=True)
-        return torch.cat([x, x_last], dim=-1)
+
+        # simplex tangent space
+        if self.simplex_tangent:
+            x_last = -x.sum(dim=-1, keepdim=True)
+            return torch.cat([x, x_last], dim=-1)
+        return x

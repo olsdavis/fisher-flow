@@ -1,0 +1,7 @@
+name: TembMLP
+depth: 4
+hidden: 128
+activation: gelu
+emb_size: 64
+time_emb: sinusoidal
+input_emb: sinusoidal

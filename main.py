@@ -19,11 +19,13 @@ def main():
     # How many steps to use in inference? (Used also for KL, for instance.)
     parser.add_argument("--inference_steps", default=100, type=int)
     # How many points to use in KL estimation?
-    parser.add_argument("--kl_points", default=512_000, type=int)
+    parser.add_argument("--kl_points", default=25_000, type=int)
     # How to sample points? Draw from distribution or take argmax proba?
     parser.add_argument("--sampling_mode", default="max", type=str)
     # What training method to use?
     parser.add_argument("--train_method", default="ot-cft", type=str, choices=training_methods)
+    # Where is the config for the model?
+    parser.add_argument("--config", "-c", type=str)
     args = vars(parser.parse_args())
     print(args)
 

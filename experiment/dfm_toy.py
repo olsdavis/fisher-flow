@@ -7,10 +7,11 @@ from torch.utils.data import Dataset, DataLoader, TensorDataset
 import numpy as np
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import wandb
+from config import (
+    load_model_config,
+    model_from_config,
+)
 from util import (
-    MLP,
-    ProductMLP,
-    TembMLP,
     NSimplex,
     OTSampler,
     dfm_train_step,
@@ -139,10 +140,15 @@ def train(
 
 
 def run_dfm_toy_experiment(args: dict[str, Any]):
+    """
+    Runs the experiment on the toy data.
+    """
     kls = []
     seq_len = 4
     epochs = 300
+    lr = 1e-4
     ds = [5, 10, 20, 40, 60, 80, 100, 120, 140, 160]
+    model_config = load_model_config(args["config"])
     for d in ds:
         wandb.init(
             project="simplex-flow-matching",
@@ -166,8 +172,8 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
         print(f"---=== {d}-simplices ===---")
         trained = train(
             epochs,
-            1e-3,
-            ProductMLP(d, seq_len, 128, 4, activation="gelu"),
+            lr,
+            model_from_config(k=seq_len, dim=d, config=model_config),
             train_loader,
             test_loader,
             wasserstein_set,
@@ -181,8 +187,8 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
                 trained,
                 Dirichlet(torch.ones_like(real_probas)),  # uniform
                 real_probas,
-                args["kl_points"],
-                args["inference_steps"],
+                n=args["kl_points"],
+                inference_steps=args["inference_steps"],
                 sampling_mode=args["sampling_mode"],
             )
         ]
