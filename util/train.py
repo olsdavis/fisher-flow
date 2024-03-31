@@ -47,13 +47,7 @@ def ot_train_step(
     k = x_1.size(1)
     d = x_1.size(-1)
     t = torch.rand((b, 1), device=x_1.device) * (1.0 - time_eps)
-    if isinstance(m, NSphere):
-        # uniform on positive orthant
-        x_0 = torch.randn((b, k, d)).to(x_1.device)
-        x_0 = x_0 / x_0.norm(dim=-1, keepdim=True)
-        x_0 = x_0.abs()
-    else:
-        x_0 = Dirichlet(torch.ones(k, d)).sample((b,)).to(x_1.device)
+    x_0 = m.uniform_prior(b, k, d).to(x_1.device)
     return cft_loss_function(x_0, x_1, t, m, model, sampler)
 
 

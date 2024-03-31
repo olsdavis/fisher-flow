@@ -20,7 +20,6 @@ def set_seeds(seed: int = 0):
 def estimate_categorical_kl(
     model: nn.Module,
     manifold: Manifold,
-    prior: Dirichlet,
     real_dist: Tensor,
     n: int,
     batch: int = 512,
@@ -35,7 +34,6 @@ def estimate_categorical_kl(
     Parameters:
         - `model`: the model;
         - `manifold`: manifold over which the model was trained;
-        - `prior`: the prior distribution to generate points from for `model`;
         - `real_dist`: the real distribution tensor of shape `(k, d)`;
         - `n`: the number of points over which the estimate should be done;
         - `batch`: the number of points to draw per batch;
@@ -58,9 +56,9 @@ def estimate_categorical_kl(
     to_draw = n
     while to_draw > 0:
         draw = min(batch, to_draw)
-        x_0 = prior.sample((draw,)).to(real_dist.device)
-        if isinstance(manifold, NSphere):
-            x_0 = NSimplex().sphere_map(x_0)
+        x_0 = manifold.uniform_prior(
+            draw, real_dist.size(0), real_dist.size(1),
+        ).to(real_dist.device)
         x_1 = simplex.tangent_euler(x_0, model, inference_steps)
         if isinstance(manifold, NSphere):
             x_1 = NSimplex().inv_sphere_map(x_1)

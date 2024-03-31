@@ -5,6 +5,7 @@ import math
 
 
 import torch
+from torch.distributions import Dirichlet, MultivariateNormal
 from torch import Tensor, nn
 import ot
 from einops import rearrange
@@ -200,6 +201,12 @@ class Manifold(ABC):
         complete each coordinate to make it tangent at `p`.
         """
 
+    @abstractmethod
+    def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
+        """
+        Returns samples from a uniform prior on the manifold.
+        """
+
 
 class NSimplex(Manifold):
     """
@@ -279,6 +286,12 @@ class NSimplex(Manifold):
         s = v.sum(dim=-1, keepdim=True)
         return torch.cat([v, -s], dim=-1)
 
+    def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
+        """
+        See `Manifold.uniform_prior`.
+        """
+        return Dirichlet(torch.ones((k, d))).sample((n,))
+
 
 class NSphere(Manifold):
     """
@@ -347,3 +360,12 @@ class NSphere(Manifold):
         # last coordinate must be -(curr) / p_n
         last = -(curr / p[:, :, -1].unsqueeze(-1))
         return torch.cat([v, last], dim=-1)
+
+    def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
+        """
+        See `Manifold.uniform_prior`.
+        """
+        x_0 = torch.randn((n, k, d))
+        x_0 = x_0 / x_0.norm(dim=-1, keepdim=True)
+        x_0 = x_0.abs()
+        return x_0

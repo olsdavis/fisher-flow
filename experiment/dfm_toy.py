@@ -12,6 +12,7 @@ from config import (
     model_from_config,
 )
 from util import (
+    Manifold,
     NSimplex,
     NSphere,
     OTSampler,
@@ -61,9 +62,13 @@ def _generate_raw_tensor(probas: Tensor, n: int) -> Tensor:
     return x
 
 
-def _generate_dataset(probas: Tensor, n_train: int, n_test: int) -> tuple[Dataset, Dataset]:
+def _generate_dataset(probas: Tensor, manifold: Manifold, n_train: int, n_test: int) -> tuple[Dataset, Dataset]:
     x_train = _generate_raw_tensor(probas, n_train)
     x_test = _generate_raw_tensor(probas, n_test)
+    if isinstance(manifold, NSphere):
+        # need to send to sphere!
+        x_train = NSimplex().sphere_map(x_train)
+        x_test = NSimplex().sphere_map(x_test)
     return TensorDataset(x_train), TensorDataset(x_test)
 
 
@@ -97,13 +102,7 @@ def train(
                 n = shape[0]
                 k = shape[1]
                 d = shape[2]
-                if args["manifold"] == "sphere":
-                    # uniform on positive orthant
-                    x_0 = torch.randn((n, k, d)).to(device)
-                    x_0 = x_0 / x_0.norm(dim=-1, keepdim=True)
-                    x_0 = x_0.abs()
-                else:
-                    x_0 = Dirichlet(torch.ones(k, d)).sample((n,)).to(device)
+                x_0 = manifold.uniform_prior(n, k, d).to(device)
                 final_traj = manifold.tangent_euler(x_0, model, inference_steps)
                 w2 = manifold.wasserstein_dist(wasserstein_set, final_traj, power=2)
             logs["w2"] = w2
@@ -173,10 +172,12 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
             )
         set_seeds()
 
+        manifold = NSimplex() if args["manifold"] == "simplex" else NSphere()
+
         # generate data
         # send to device for KL later
         real_probas = torch.softmax(torch.rand((seq_len, d)), dim=-1).to(device)
-        train_dataset, test_dataset = _generate_dataset(real_probas, 10000, 1000)
+        train_dataset, test_dataset = _generate_dataset(real_probas, manifold, 10000, 1000)
         wasserstein_set = _generate_raw_tensor(real_probas, 512).to(device)
         if args["manifold"] == "sphere":
             wasserstein_set = NSimplex().sphere_map(wasserstein_set)
@@ -207,7 +208,6 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
             estimate_categorical_kl(
                 trained,
                 NSimplex() if args["manifold"] == "simplex" else NSphere(),
-                Dirichlet(torch.ones_like(real_probas)),  # uniform
                 real_probas,
                 n=args["kl_points"],
                 inference_steps=args["inference_steps"],
