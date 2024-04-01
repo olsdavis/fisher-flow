@@ -2,7 +2,7 @@
 from typing import Any
 import torch
 from torch import Tensor, nn
-from torch.distributions import Categorical, Dirichlet, MultivariateNormal
+from torch.distributions import Categorical
 from torch.utils.data import Dataset, DataLoader, TensorDataset
 from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingLR
 import numpy as np
@@ -27,48 +27,16 @@ from util import (
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 
-@torch.no_grad()
-def label_smoothing(one_hot_labels: Tensor, smoothing: float = 0.98) -> Tensor:
-    """
-    Applies label smoothing to a batch of one-hot encoded vectors.
-
-    Parameters:
-        - `one_hot_labels`: A tensor of shape (batch_size, k, d)
-            containing one-hot encoded labels.
-        - `smoothing`: The value to assign to the target class
-            in each label vector. Default is 0.98.
-
-    Returns:
-        A tensor of the same shape as one_hot_labels with smoothed labels.
-    """
-    num_classes = one_hot_labels.size(-1)
-
-    # Value to be added to each non-target class
-    increase = (1.0 - smoothing) / (num_classes - 1)
-
-    # Create a tensor with all elements set to the increase value
-    smooth_labels = torch.full_like(one_hot_labels.float(), increase)
-
-    # Set the target classes to the smoothing value
-    smooth_labels[one_hot_labels == 1] = smoothing
-
-    return smooth_labels
-
-
-def _generate_raw_tensor(probas: Tensor, n: int) -> Tensor:
+def _generate_raw_tensor(probas: Tensor, m: Manifold, n: int) -> Tensor:
     dist = Categorical(probas)
     x = torch.nn.functional.one_hot(dist.sample((n,)), probas.size(-1))
-    x = label_smoothing(x)
+    x = m.smooth_labels(x.float(), 0.9999 if isinstance(m, NSphere) else 0.98)
     return x
 
 
 def _generate_dataset(probas: Tensor, manifold: Manifold, n_train: int, n_test: int) -> tuple[Dataset, Dataset]:
-    x_train = _generate_raw_tensor(probas, n_train)
-    x_test = _generate_raw_tensor(probas, n_test)
-    if isinstance(manifold, NSphere):
-        # need to send to sphere!
-        x_train = NSimplex().sphere_map(x_train)
-        x_test = NSimplex().sphere_map(x_test)
+    x_train = _generate_raw_tensor(probas, manifold, n_train)
+    x_test = _generate_raw_tensor(probas, manifold, n_test)
     return TensorDataset(x_train), TensorDataset(x_test)
 
 
@@ -91,7 +59,7 @@ def train(
     ot_sampler = OTSampler(manifold, "exact")
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     # lr_scheduler = ReduceLROnPlateau(optimizer)
-    lr_scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-5)
+    # lr_scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-5)
     for epoch in range(epochs):
         logs = {}
         # Wasserstein eval
@@ -125,7 +93,7 @@ def train(
             optimizer.step()
             train_loss += [loss.item()]
         logs["train_loss"] = np.mean(train_loss)
-        lr_scheduler.step()
+        # lr_scheduler.step()
         # lr_scheduler.step(logs["train_loss"])
 
         # test loss
@@ -156,8 +124,8 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
     """
     kls = []
     seq_len = 4
-    epochs = 300
-    lr = 1e-4
+    epochs = 50
+    lr = 1e-3
     ds = [5, 10, 20, 40, 60, 80, 100, 120, 140, 160]
     model_config = load_model_config(args["config"])
     for d in ds:
@@ -178,9 +146,7 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
         # send to device for KL later
         real_probas = torch.softmax(torch.rand((seq_len, d)), dim=-1).to(device)
         train_dataset, test_dataset = _generate_dataset(real_probas, manifold, 10000, 1000)
-        wasserstein_set = _generate_raw_tensor(real_probas, 512).to(device)
-        if args["manifold"] == "sphere":
-            wasserstein_set = NSimplex().sphere_map(wasserstein_set)
+        wasserstein_set = _generate_raw_tensor(real_probas, manifold, 2500).to(device)
         train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
         test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 

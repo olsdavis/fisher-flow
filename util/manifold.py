@@ -5,7 +5,7 @@ import math
 
 
 import torch
-from torch.distributions import Dirichlet, MultivariateNormal
+from torch.distributions import Dirichlet
 from torch import Tensor, nn
 import ot
 from einops import rearrange
@@ -207,6 +207,12 @@ class Manifold(ABC):
         Returns samples from a uniform prior on the manifold.
         """
 
+    @abstractmethod
+    def smooth_labels(self, labels: Tensor, mx: float = 0.98) -> Tensor:
+        """
+        Smoothes the labels on the manifold.
+        """
+
 
 class NSimplex(Manifold):
     """
@@ -275,7 +281,7 @@ class NSimplex(Manifold):
             v / p.sqrt(),
         )
         return y_s * q_s
-    
+
     def make_tangent(self, p: Tensor, v: Tensor) -> Tensor:
         """
         See `Manifold.make_tangent`.
@@ -291,6 +297,24 @@ class NSimplex(Manifold):
         See `Manifold.uniform_prior`.
         """
         return Dirichlet(torch.ones((k, d))).sample((n,))
+
+    @torch.no_grad()
+    def smooth_labels(self, labels: Tensor, mx: float = 0.98) -> Tensor:
+        """
+        See `Manifold.smooth_labels`.
+        """
+        num_classes = labels.size(-1)
+
+        # Value to be added to each non-target class
+        increase = (1.0 - mx) / (num_classes - 1)
+
+        # Create a tensor with all elements set to the increase value
+        smooth_labels = torch.full_like(labels.float(), increase)
+
+        # Set the target classes to the smoothing value
+        smooth_labels[labels == 1] = mx
+
+        return smooth_labels
 
 
 class NSphere(Manifold):
@@ -369,3 +393,10 @@ class NSphere(Manifold):
         x_0 = x_0 / x_0.norm(dim=-1, keepdim=True)
         x_0 = x_0.abs()
         return x_0
+
+    def smooth_labels(self, labels: Tensor, mx: float = 0.9999) -> Tensor:
+        """
+        See `Manifold.smooth_labels`.
+        """
+        simplex = NSimplex()
+        return simplex.sphere_map(simplex.smooth_labels(labels, mx))

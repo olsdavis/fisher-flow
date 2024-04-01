@@ -1,12 +1,16 @@
 """Entry point."""
 import argparse
-from experiment import run_dfm_toy_experiment
+from experiment import (
+    run_dfm_toy_experiment,
+    run_simple_experiment,
+)
 
 
 def main():
     training_methods = ["ot-cft", "dft"]
     experiments_available = {
         "dfm_toy": run_dfm_toy_experiment,
+        "simple": run_simple_experiment,
     }
 
     # args

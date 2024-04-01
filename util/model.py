@@ -12,6 +12,7 @@ def str_to_activation(name: str) -> nn.Module:
         "lrelu": nn.LeakyReLU(0.01),
         "gelu": nn.GELU(),
         "elu": nn.ELU(),
+        "swish": nn.SiLU(),
     }
     return acts[name]
 
