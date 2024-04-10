@@ -2,7 +2,7 @@
 import torch
 from torch.distributions.dirichlet import Dirichlet
 from torch import Tensor, nn
-from util import Manifold, NSimplex, NSphere, OTSampler
+from util import Manifold, OTSampler
 
 
 def dfm_train_step(

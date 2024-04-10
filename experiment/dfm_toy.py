@@ -30,7 +30,7 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 def _generate_raw_tensor(probas: Tensor, m: Manifold, n: int) -> Tensor:
     dist = Categorical(probas)
     x = torch.nn.functional.one_hot(dist.sample((n,)), probas.size(-1))
-    x = m.smooth_labels(x.float(), 0.9999 if isinstance(m, NSphere) else 0.98)
+    x = m.smooth_labels(x.float(), 0.81 if isinstance(m, NSphere) else 0.9)
     return x
 
 
@@ -46,7 +46,7 @@ def train(
     model: nn.Module,
     train_loader: DataLoader,
     test_loader: DataLoader,
-    wasserstein_set: Tensor,
+    wasserstein_set: Tensor | None,
     train_method: str,
     wasserstein_every: int = 10,
     inference_steps: int = 100,
@@ -57,13 +57,13 @@ def train(
     model = model.to(device)
     manifold = NSimplex() if args["manifold"] == "simplex" else NSphere()
     ot_sampler = OTSampler(manifold, "exact")
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    # lr_scheduler = ReduceLROnPlateau(optimizer)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.0)
+    lr_scheduler = ReduceLROnPlateau(optimizer)
     # lr_scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-5)
     for epoch in range(epochs):
         logs = {}
         # Wasserstein eval
-        if epoch % wasserstein_every == 0:
+        if epoch % wasserstein_every == 0 and wasserstein_set:
             model.eval()
             with torch.no_grad():
                 shape = wasserstein_set.shape
@@ -94,7 +94,7 @@ def train(
             train_loss += [loss.item()]
         logs["train_loss"] = np.mean(train_loss)
         # lr_scheduler.step()
-        # lr_scheduler.step(logs["train_loss"])
+        lr_scheduler.step(logs["train_loss"])
 
         # test loss
         test_loss = []
@@ -144,11 +144,11 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
 
         # generate data
         # send to device for KL later
-        real_probas = torch.softmax(torch.rand((seq_len, d)), dim=-1).to(device)
+        real_probas = torch.softmax(torch.rand((seq_len, d)), dim=-1)
         train_dataset, test_dataset = _generate_dataset(real_probas, manifold, 10000, 1000)
-        wasserstein_set = _generate_raw_tensor(real_probas, manifold, 2500).to(device)
-        train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-        test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
+        # wasserstein_set = _generate_raw_tensor(real_probas, manifold, 2500).to(device)
+        train_loader = DataLoader(train_dataset, batch_size=512, shuffle=True)
+        test_loader = DataLoader(test_dataset, batch_size=512, shuffle=False)
 
         # start
         print(f"---=== {d}-simplices ===---")
@@ -163,7 +163,7 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
             ),
             train_loader,
             test_loader,
-            wasserstein_set,
+            wasserstein_set=None,
             train_method=args["train_method"],
             inference_steps=args["inference_steps"],
             args=args,
@@ -174,7 +174,7 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
             estimate_categorical_kl(
                 trained,
                 NSimplex() if args["manifold"] == "simplex" else NSphere(),
-                real_probas,
+                real_probas.to(device),
                 n=args["kl_points"],
                 inference_steps=args["inference_steps"],
                 sampling_mode=args["sampling_mode"],

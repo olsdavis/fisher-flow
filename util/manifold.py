@@ -234,12 +234,12 @@ class NSimplex(Manifold):
         """
         See `Manifold.log_map`.
         """
-        rt_prod = (p * q).sqrt()
-        dot = rt_prod.sum(dim=-1, keepdim=True)
-        dist = 2.0 * torch.arccos(dot)
-        denom = (1.0 - dot ** 2).sqrt()
-        fact = rt_prod - dot * p
-        return (dist / (denom)) * fact
+        ret = torch.zeros_like(p)
+        z = (p * q).sqrt()
+        s = z.sum(dim=-1, keepdim=True)
+        close = ((s.square() - 1.0).abs() < 1e-7).expand_as(ret)
+        ret[~close] = (2.0 * safe_arccos(s) / (1.0 - s.square()).sqrt() * (z - s * p))[~close]
+        return ret
 
     def geodesic_distance(self, p: Tensor, q: Tensor) -> Tensor:
         """
@@ -335,29 +335,20 @@ class NSphere(Manifold):
         """
         See `Manifold.log_map`.
         """
-        cos = torch.clamp((p * q).sum(dim=-1, keepdim=True), -1.0, 1.0)
+        cos = (p * q).sum(dim=-1, keepdim=True).clamp(-1.0, 1.0)
         # do not need to handle properly case where cos approx -1
         # since we are on the positive orthant of the sphere
         theta = safe_arccos(cos)
-        return (q - cos * p) / usinc(theta)
+        x = (q - cos * p) / usinc(theta)
+        # project: X .- real(dot(p, X)) .* p
+        return x - (x * p).sum(dim=-1, keepdim=True) * p
 
     def geodesic_distance(self, p: Tensor, q: Tensor) -> Tensor:
         """
         See `Manifold.geodesic_distance`.
         """
-        cos = (p * q).sum(dim=-1)
+        cos = (p * q).sum(dim=-1).clamp(-1.0, 1.0)
         # sum across product space
-        """
-        Safe version:
-        return torch.where(
-            (cos.abs() - 1.0).abs() < 1e-6,
-            2.0 * torch.atan2(
-                (p - q).norm(dim=-1),
-                (p + q).norm(dim=-1),
-            ).abs(),
-            safe_arccos(cos),
-        ).sum(dim=1)
-        """
         return safe_arccos(cos).sum(dim=1)
 
     def metric(self, x: Tensor, u: Tensor, v: Tensor) -> Tensor:
@@ -390,9 +381,8 @@ class NSphere(Manifold):
         See `Manifold.uniform_prior`.
         """
         x_0 = torch.randn((n, k, d))
-        x_0 = x_0 / x_0.norm(dim=-1, keepdim=True)
-        x_0 = x_0.abs()
-        return x_0
+        x_0 = x_0 / x_0.norm(p=2, dim=-1, keepdim=True)
+        return x_0.abs()
 
     def smooth_labels(self, labels: Tensor, mx: float = 0.9999) -> Tensor:
         """

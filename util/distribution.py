@@ -73,7 +73,11 @@ def estimate_categorical_kl(
             )
             acc += samples.sum(dim=0)
         to_draw -= draw
+        del x_0
+        del x_1
+        del samples
 
     acc /= float(n)
-
-    return (acc * (acc.log() - real_dist.log())).sum().item()
+    ret = (acc * (acc.log() - real_dist.log())).sum().item()
+    del acc
+    return ret
