@@ -107,7 +107,7 @@ class Manifold(ABC):
         """
         dt = 1.0 / steps
         x = x_0
-        t = torch.full((x.size(0), 1), dt, device=x_0.device)
+        t = torch.zeros((x.size(0), 1), device=x_0.device)
         for _ in range(steps):
             t += dt
             x = self.exp_map(x, self.make_tangent(x, model(x, t)) * dt)
@@ -336,11 +336,10 @@ class NSphere(Manifold):
         See `Manifold.log_map`.
         """
         cos = (p * q).sum(dim=-1, keepdim=True).clamp(-1.0, 1.0)
-        # do not need to handle properly case where cos approx -1
-        # since we are on the positive orthant of the sphere
+        # otherwise
         theta = safe_arccos(cos)
         x = (q - cos * p) / usinc(theta)
-        # project: X .- real(dot(p, X)) .* p
+        # X .- real(dot(p, X)) .* p
         return x - (x * p).sum(dim=-1, keepdim=True) * p
 
     def geodesic_distance(self, p: Tensor, q: Tensor) -> Tensor:
@@ -370,11 +369,12 @@ class NSphere(Manifold):
         """
         See `Manifold.make_tangent`.
         """
-        # dot of all but last
+        """# dot of all but last
         curr = (p[:, :, :-1] * v).sum(dim=-1, keepdim=True)
         # last coordinate must be -(curr) / p_n
         last = -(curr / p[:, :, -1].unsqueeze(-1))
-        return torch.cat([v, last], dim=-1)
+        return torch.cat([v, last], dim=-1)"""
+        return (v - p * (p * v).sum(dim=-1, keepdim=True))
 
     def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
         """

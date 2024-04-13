@@ -24,7 +24,7 @@ from util import (
 )
 
 
-device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+device = torch.device("cuda:1") if torch.cuda.is_available() else torch.device("cpu")
 
 
 def _generate_raw_tensor(probas: Tensor, m: Manifold, n: int) -> Tensor:
@@ -124,7 +124,7 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
     """
     kls = []
     seq_len = 4
-    epochs = 50
+    epochs = 300
     lr = 1e-3
     ds = [5, 10, 20, 40, 60, 80, 100, 120, 140, 160]
     model_config = load_model_config(args["config"])
@@ -141,6 +141,7 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
         set_seeds()
 
         manifold = NSimplex() if args["manifold"] == "simplex" else NSphere()
+        print(type(manifold).__name__)
 
         # generate data
         # send to device for KL later
@@ -158,7 +159,6 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
             model_from_config(
                 k=seq_len,
                 dim=d,
-                simplex_tangent=args["train_method"] == "ot-cft",
                 config=model_config,
             ),
             train_loader,
@@ -173,7 +173,7 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
         kls += [
             estimate_categorical_kl(
                 trained,
-                NSimplex() if args["manifold"] == "simplex" else NSphere(),
+                manifold,
                 real_probas.to(device),
                 n=args["kl_points"],
                 inference_steps=args["inference_steps"],

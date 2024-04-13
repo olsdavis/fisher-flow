@@ -3,9 +3,8 @@ import torch
 from torch import Tensor
 
 
-def usinc(theta: Tensor, eps: float = 1e-7) -> Tensor:
+def usinc(theta: Tensor, eps: float = 1e-8) -> Tensor:
     """Unnormalized sinc."""
-
     return torch.where(
         torch.abs(theta) < eps,
         1.0,  # sinc(0) = 1, by definition

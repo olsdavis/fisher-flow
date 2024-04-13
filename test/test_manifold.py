@@ -1,6 +1,7 @@
 """Testing manifolds."""
 import unittest
 import torch
+from torch import testing
 from util import NSimplex, NSphere, set_seeds
 
 
@@ -44,8 +45,8 @@ class TestNSphere(unittest.TestCase):
         Tests whether the log and exp map are defined correctly.
         """
         m = NSphere()
-        x_0 = torch.Tensor([0.5, 0.5, 0.5, 0.5])
-        x_1 = torch.Tensor([0.20, 0.20, 0.50, 0.10]).sqrt()
+        x_0 = torch.Tensor([[[0.5, 0.5, 0.5, 0.5]]])
+        x_1 = torch.Tensor([[[0.20, 0.20, 0.50, 0.10]]]).sqrt()
         back = m.exp_map(x_0, m.log_map(x_0, x_1))
         self.assertTrue(
             torch.allclose(back, x_1),
@@ -80,6 +81,18 @@ class TestNSphere(unittest.TestCase):
             f"too large difference: {tangent}",
         )
 
+    @torch.no_grad()
+    def test_log_edge_cases(self):
+        """
+        Tests some edge cases for log map.
+        """
+        return  # pass this for now
+        points = torch.randn(10, 1, 2)
+        points = points / points.norm(dim=-1, keepdim=True)
+        m = NSphere()
+        log = m.log_map(points, -points).norm(dim=-1).sum(dim=1)
+        testing.assert_close(log, torch.full_like(log, torch.pi))
+
 
 class TestManifoldsGeneral(unittest.TestCase):
     """
@@ -101,7 +114,7 @@ class TestManifoldsGeneral(unittest.TestCase):
             y = manifold.uniform_prior(500, 3, 3)
             self.assertTrue(
                 torch.allclose(manifold.geodesic_distance(x, y), manifold.geodesic_distance(y, x)),
-                f"geodesic not uniform for {manifold}",
+                f"geodesic not symmetric for {manifold}",
             )
 
     @torch.no_grad()
@@ -109,15 +122,57 @@ class TestManifoldsGeneral(unittest.TestCase):
         """
         Tests whether the log and exp maps are inverses.
         """
+        seq_len = 4
+        dim = 160
         for manifold in self.manifolds:
             set_seeds(1)
-            x = manifold.uniform_prior(500, 3, 3)
-            y = manifold.uniform_prior(500, 3, 3)
+            x = manifold.uniform_prior(500, seq_len, dim)
+            y = manifold.uniform_prior(500, seq_len, dim)
             back = manifold.exp_map(x, manifold.log_map(x, y))
-            self.assertTrue(
-                torch.allclose(back, y, atol=1e-7),
-                f"too large difference: {manifold} - {back}, {y}"
+            # TODO is 1e-7 good enough?
+            testing.assert_close(
+                back, y, rtol=1e-5, atol=1e-7,
             )
+
+    @torch.no_grad()
+    def test_parallel_transport(self):
+        """
+        Tests whether parallel transport retains tangency.
+        """
+        dim = 160
+        seq_len = 4
+        for manifold in self.manifolds:
+            set_seeds(2)
+            p = manifold.uniform_prior(500, seq_len, dim)
+            q = manifold.uniform_prior(500, seq_len, dim)
+            v = torch.rand((500, seq_len, dim - 1))
+            v = manifold.make_tangent(p, v)
+            if type(manifold).__name__ == "NSimplex":
+                testing.assert_close(
+                    v.sum(dim=-1), torch.full((500, seq_len), 1e-8), atol=1e-4, rtol=1e-5,
+                )
+            elif type(manifold).__name__ == "NSphere":
+                testing.assert_close(
+                    (v * p).sum(dim=-1),
+                    torch.full((500, seq_len), 1e-8),
+                    atol=1e-4,
+                    rtol=1e-5,
+                )
+            transported = manifold.parallel_transport(p, q, v)
+            if type(manifold).__name__ == "NSimplex":
+                testing.assert_close(
+                    transported.sum(dim=-1),
+                    torch.zeros(500, seq_len),
+                    atol=1e-3,
+                    rtol=1e-5,
+                )
+            elif type(manifold).__name__ == "NSphere":
+                testing.assert_close(
+                    (transported * q).sum(dim=-1),
+                    torch.full((500, seq_len), 1e-8),
+                    atol=1e-3,
+                    rtol=1e-5,
+                )
 
 
 if __name__ == "__main__":

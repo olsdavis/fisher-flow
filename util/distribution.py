@@ -51,7 +51,6 @@ def estimate_categorical_kl(
     # init acc
     acc = torch.zeros_like(real_dist, device=real_dist.device)
 
-    simplex = NSimplex()
     model.eval()
     to_draw = n
     while to_draw > 0:
@@ -59,7 +58,7 @@ def estimate_categorical_kl(
         x_0 = manifold.uniform_prior(
             draw, real_dist.size(0), real_dist.size(1),
         ).to(real_dist.device)
-        x_1 = simplex.tangent_euler(x_0, model, inference_steps)
+        x_1 = manifold.tangent_euler(x_0, model, inference_steps)
         if isinstance(manifold, NSphere):
             x_1 = NSimplex().inv_sphere_map(x_1)
         if sampling_mode == "sample":

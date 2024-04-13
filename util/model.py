@@ -78,7 +78,7 @@ class ProductMLP(nn.Module):
         k: int,
         hidden: int,
         depth: int,
-        tangent: bool = True,
+        simplex_tangent: bool = True,
         activation: str = "relu",
         **_,
     ):
@@ -88,14 +88,14 @@ class ProductMLP(nn.Module):
             - `k`: the number of simplices in the product;
             - `hidden`: the hidden dimension;
             - `depth`: the depth of the network;
-            - `tangent`: when `True` makes the point output constrained
+            - `simplex_tangent`: when `True` makes the point output constrained
             to the tangent space of the manifold;
             - `activation`: the activation function.
 
         Other arguments are ignored.
         """
         super().__init__()
-        self.tangent = tangent
+        self.tangent = simplex_tangent
         act = str_to_activation(activation)
         net: list[nn.Module] = []
         for i in range(depth):
@@ -103,7 +103,7 @@ class ProductMLP(nn.Module):
                 nn.Linear(
                     k * dim + 1 if i == 0 else hidden,
                     hidden if i < depth - 1 else
-                        k * (dim - 1 if tangent else dim),
+                        k * (dim - 1 if simplex_tangent else dim),
                 )
             ]
             if i < depth - 1:

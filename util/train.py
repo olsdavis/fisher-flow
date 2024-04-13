@@ -81,7 +81,7 @@ def cft_loss_function(
     out = model(x_t, t)
     out = m.make_tangent(x_t, out)
     # TODO: Check this
-    # print(out.norm(dim=-1).sum(dim=1).max(), m.log_map(x_0, x_1).norm(dim=-1).sum(dim=1).min())
+    # print(out.norm(dim=-1).sum(dim=1).max(), target.norm(dim=-1).sum(dim=1).min())
     diff = out - target
     loss = m.square_norm_at(x_t, diff)
     loss = loss.sum(dim=1)

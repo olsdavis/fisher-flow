@@ -19,8 +19,8 @@ class ModelConfig:
     input_emb: str | None = "sinusoidal"
     add_t_emb: bool | None = False
     concat_t_emb: bool | None = False
-    # simplex_tangent is not here, as it is defined by the training method
-    # same for k, d
+    simplex_tangent: bool | None = True
+    # k, d defined by task
 
 
 def load_model_config(path: str) -> ModelConfig:
@@ -33,7 +33,6 @@ def load_model_config(path: str) -> ModelConfig:
 def model_from_config(
     k: int,
     dim: int,
-    simplex_tangent: bool,
     config: ModelConfig,
 ) -> nn.Module:
     """
@@ -53,6 +52,5 @@ def model_from_config(
     return models_available[config.name](
         k=k,
         dim=dim,
-        simplex_tangent=simplex_tangent,
         **asdict(config),
     )
