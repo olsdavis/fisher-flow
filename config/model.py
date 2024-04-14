@@ -19,7 +19,6 @@ class ModelConfig:
     input_emb: str | None = "sinusoidal"
     add_t_emb: bool | None = False
     concat_t_emb: bool | None = False
-    simplex_tangent: bool | None = True
     # k, d defined by task
 
 

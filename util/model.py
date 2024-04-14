@@ -17,56 +17,6 @@ def str_to_activation(name: str) -> nn.Module:
     return acts[name]
 
 
-class MLP(nn.Module):
-    """
-    Defines a simple MLP with time.
-    """
-    def __init__(
-        self,
-        dim: int,
-        depth: int,
-        hidden: int,
-        tangent: bool = True,
-        activation: str = "relu",
-    ):
-        """
-        Parameters:
-            - `dim`: the dimension of the input and output;
-            - `depth`: the depth of the network;
-            - `hidden`: the size of hidden features;
-            - `tangent`: when `True` makes the point output constrained
-            to the tangent space of the manifold;
-            - `activation`: the activation function to use.
-        """
-        super().__init__()
-        act = str_to_activation(activation)
-
-        net: list[nn.Module] = []
-        for i in range(depth):
-            out = hidden
-            if i == depth - 1:
-                if tangent:
-                    out = dim - 1
-                else:
-                    out = dim
-            net += [
-                nn.Linear(
-                    # +1 for time
-                    dim + 1 if i == 0 else hidden,
-                    out,
-                )
-            ]
-            if i < depth - 1:
-                net += [act]
-        self.net = nn.Sequential(*net)
-
-    def forward(self, x: Tensor, t: Tensor) -> Tensor:
-        """
-        Applies the MLP to the input `(x, t)`.
-        """
-        return self.net(torch.cat([x, t], dim=-1))
-
-
 class ProductMLP(nn.Module):
     """
     An MLP that operates over all k d-simplices at the same time.
@@ -78,7 +28,6 @@ class ProductMLP(nn.Module):
         k: int,
         hidden: int,
         depth: int,
-        simplex_tangent: bool = True,
         activation: str = "relu",
         **_,
     ):
@@ -88,14 +37,11 @@ class ProductMLP(nn.Module):
             - `k`: the number of simplices in the product;
             - `hidden`: the hidden dimension;
             - `depth`: the depth of the network;
-            - `simplex_tangent`: when `True` makes the point output constrained
-            to the tangent space of the manifold;
             - `activation`: the activation function.
 
         Other arguments are ignored.
         """
         super().__init__()
-        self.simplex_tangent = simplex_tangent
         act = str_to_activation(activation)
         net: list[nn.Module] = []
         for i in range(depth):
@@ -103,7 +49,7 @@ class ProductMLP(nn.Module):
                 nn.Linear(
                     k * dim + 1 if i == 0 else hidden,
                     hidden if i < depth - 1 else
-                        k * (dim - 1 if simplex_tangent else dim),
+                        k * dim,
                 )
             ]
             if i < depth - 1:
@@ -114,11 +60,7 @@ class ProductMLP(nn.Module):
         """
         Applies the MLP to the input `(x, t)`.
         """
-        shape = list(x.shape)
-        # remove one dimension if tangent space
-        if self.simplex_tangent:
-            shape[-1] = shape[-1] - 1
-        final_shape = tuple(shape)
+        final_shape = x.shape
         x = x.view((x.size(0), -1))
         # run
         out = self.net(torch.cat([x, t], dim=-1))
@@ -330,7 +272,6 @@ class TembMLP(nn.Module):
         add_t_emb: bool = False,
         concat_t_emb: bool = False,
         activation: str = "gelu",
-        simplex_tangent: bool = True,
         **_,
     ):
         """
@@ -343,17 +284,13 @@ class TembMLP(nn.Module):
             - `input_emb`: the type of input embedding;
             - `add_t_emb`: if the time embedding should be residually added;
             - `concat_t_emb`: if the time embedding should be concatenated;
-            - `activation`: the activation function to use;
-            - `simplex_tangent`: whether the model should output values in the tangent
-                space of the manifold.
+            - `activation`: the activation function to use.
 
         Other arguments are ignored.
         """
-        print(f"simplex tangent {simplex_tangent}")
         super().__init__()
         self.add_t_emb = add_t_emb
         self.concat_t_emb = concat_t_emb
-        self.simplex_tangent = simplex_tangent
         self.activation = str_to_activation(activation)
         self.time_mlp = PositionalEmbedding(emb_size, time_emb)
         positional_embeddings = []
@@ -371,7 +308,7 @@ class TembMLP(nn.Module):
             layers.append(TembBlock(hidden, activation, emb_size, add_t_emb, concat_t_emb))
 
         in_size = emb_size + hidden if concat_t_emb else hidden
-        layers.append(nn.Linear(in_size, k * (dim - 1) if simplex_tangent else k * dim))
+        layers.append(nn.Linear(in_size, k * dim))
 
         self.layers = layers
         self.joint_mlp = nn.Sequential(*layers)
@@ -380,10 +317,7 @@ class TembMLP(nn.Module):
         """
         Applies the model to input `(x, t)`.
         """
-        shape = list(x.shape)
-        if self.simplex_tangent:
-            shape[-1] -= 1
-        final_shape = tuple(shape)
+        final_shape = x.shape
 
         x = x.view((x.size(0), -1))
         positional_embs = [

@@ -17,7 +17,6 @@ from .misc import (
     reset_memory,
 )
 from .model import (
-    MLP,
     ProductMLP,
     TembMLP,
     str_to_activation,
