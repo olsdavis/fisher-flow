@@ -2,6 +2,7 @@
 from abc import ABC, abstractmethod
 from functools import partial
 import math
+from typing import Type
 
 
 import torch
@@ -58,7 +59,7 @@ class Manifold(ABC):
         Parameters:
             - `p`, `q`: two points on the manifold of dimensions 
                 `(B, ..., D)`.
-        
+
         Returns:
             The logarithmic map.
         """
@@ -71,7 +72,7 @@ class Manifold(ABC):
         Parameters:
             - `p`, `q`: two points on the manifold of dimensions
                 `(B, ..., D)`.
-        
+
         Returns:
             The geodesic distance.
         """
@@ -86,7 +87,7 @@ class Manifold(ABC):
             - `x_0`, `x_1`: two points on the manifold of dimensions
                 `(B, ..., D)`.
             - `t`: the time tensor of dimensions `(B, 1)`.
-        
+
         Returns:
             The geodesic interpolant at time `t`.
         """
@@ -213,6 +214,12 @@ class Manifold(ABC):
         Smoothes the labels on the manifold.
         """
 
+    @abstractmethod
+    def send_to(self, x: Tensor, m: Type["Manifold"]) -> Tensor:
+        """
+        Sends the points `x` to the manifold `m`.
+        """
+
 
 class NSimplex(Manifold):
     """
@@ -256,27 +263,15 @@ class NSimplex(Manifold):
         # ie on the boundary; doesn't work with mask (changes shape)
         return ((u * v) / x).sum(dim=-1, keepdim=True)
 
-    def sphere_map(self, p: Tensor):
-        """
-        Maps `p` to the positive orthant of the sphere.
-        """
-        return p.sqrt()
-
-    def inv_sphere_map(self, p: Tensor):
-        """
-        Maps `p` from the positive orthant of the sphere to the simplex.
-        """
-        return p.square()
-
     def parallel_transport(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
         """
         See `Manifold.parallel_transport`. Based on the parallel transport of
         `NSphere`.
         """
         sphere = NSphere()
-        q_s = self.sphere_map(q)
+        q_s = self.send_to(q, NSphere)
         y_s = sphere.parallel_transport(
-            self.sphere_map(p),
+            self.send_to(p, NSphere),
             q_s,
             v / p.sqrt(),
         )
@@ -285,12 +280,8 @@ class NSimplex(Manifold):
     def make_tangent(self, p: Tensor, v: Tensor) -> Tensor:
         """
         See `Manifold.make_tangent`.
-
-        TODO Check if the tangent plane is indeed independent of the point,
-        in the simplex.
         """
-        s = v.sum(dim=-1, keepdim=True)
-        return torch.cat([v, -s], dim=-1)
+        raise NotImplementedError("not implemented")
 
     def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
         """
@@ -315,6 +306,16 @@ class NSimplex(Manifold):
         smooth_labels[labels == 1] = mx
 
         return smooth_labels
+
+    def send_to(self, x: Tensor, m: Type["Manifold"]) -> Tensor:
+        """
+        See `Manifold.send_to`.
+        """
+        if m == NSphere:
+            return x.sqrt()
+        elif m == NSimplex:
+            return x
+        raise NotImplementedError(f"unimplemented for {m}")
 
 
 class NSphere(Manifold):
@@ -369,11 +370,6 @@ class NSphere(Manifold):
         """
         See `Manifold.make_tangent`.
         """
-        """# dot of all but last
-        curr = (p[:, :, :-1] * v).sum(dim=-1, keepdim=True)
-        # last coordinate must be -(curr) / p_n
-        last = -(curr / p[:, :, -1].unsqueeze(-1))
-        return torch.cat([v, last], dim=-1)"""
         return (v - p * (p * v).sum(dim=-1, keepdim=True))
 
     def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
@@ -388,5 +384,14 @@ class NSphere(Manifold):
         """
         See `Manifold.smooth_labels`.
         """
-        simplex = NSimplex()
-        return simplex.sphere_map(simplex.smooth_labels(labels, mx))
+        return self.send_to(NSimplex().smooth_labels(labels, mx), NSphere)
+
+    def send_to(self, x: Tensor, m: type[Manifold]) -> Tensor:
+        """
+        See `Manifold.send_to`.
+        """
+        if m == NSphere:
+            return x
+        elif m == NSimplex:
+            return x.square()
+        raise NotImplementedError(f"unimplemented for {m}")
