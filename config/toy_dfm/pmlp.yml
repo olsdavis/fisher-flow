@@ -1,5 +1,5 @@
 name: ProductMLP
 depth: 4
 hidden: 512
-activation: swish
+activation: lrelu
 simplex_tangent: false

@@ -24,7 +24,7 @@ from util import (
 )
 
 
-device = torch.device("cuda:1") if torch.cuda.is_available() else torch.device("cpu")
+device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 
 def _generate_raw_tensor(probas: Tensor, m: Manifold, n: int) -> Tensor:
@@ -124,7 +124,7 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
     """
     kls = []
     seq_len = 4
-    epochs = 300
+    epochs = 1000
     lr = 1e-3
     ds = [5, 10, 20, 40, 60, 80, 100, 120, 140, 160]
     model_config = load_model_config(args["config"])

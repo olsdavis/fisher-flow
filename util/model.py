@@ -95,7 +95,7 @@ class ProductMLP(nn.Module):
         Other arguments are ignored.
         """
         super().__init__()
-        self.tangent = simplex_tangent
+        self.simplex_tangent = simplex_tangent
         act = str_to_activation(activation)
         net: list[nn.Module] = []
         for i in range(depth):
@@ -116,7 +116,7 @@ class ProductMLP(nn.Module):
         """
         shape = list(x.shape)
         # remove one dimension if tangent space
-        if self.tangent:
+        if self.simplex_tangent:
             shape[-1] = shape[-1] - 1
         final_shape = tuple(shape)
         x = x.view((x.size(0), -1))
@@ -330,7 +330,7 @@ class TembMLP(nn.Module):
         add_t_emb: bool = False,
         concat_t_emb: bool = False,
         activation: str = "gelu",
-        tangent: bool = True,
+        simplex_tangent: bool = True,
         **_,
     ):
         """
@@ -344,15 +344,16 @@ class TembMLP(nn.Module):
             - `add_t_emb`: if the time embedding should be residually added;
             - `concat_t_emb`: if the time embedding should be concatenated;
             - `activation`: the activation function to use;
-            - `tangent`: whether the model should output values in the tangent
+            - `simplex_tangent`: whether the model should output values in the tangent
                 space of the manifold.
 
         Other arguments are ignored.
         """
+        print(f"simplex tangent {simplex_tangent}")
         super().__init__()
         self.add_t_emb = add_t_emb
         self.concat_t_emb = concat_t_emb
-        self.tangent = tangent
+        self.simplex_tangent = simplex_tangent
         self.activation = str_to_activation(activation)
         self.time_mlp = PositionalEmbedding(emb_size, time_emb)
         positional_embeddings = []
@@ -370,7 +371,7 @@ class TembMLP(nn.Module):
             layers.append(TembBlock(hidden, activation, emb_size, add_t_emb, concat_t_emb))
 
         in_size = emb_size + hidden if concat_t_emb else hidden
-        layers.append(nn.Linear(in_size, k * (dim - 1) if tangent else k * dim))
+        layers.append(nn.Linear(in_size, k * (dim - 1) if simplex_tangent else k * dim))
 
         self.layers = layers
         self.joint_mlp = nn.Sequential(*layers)
@@ -380,7 +381,7 @@ class TembMLP(nn.Module):
         Applies the model to input `(x, t)`.
         """
         shape = list(x.shape)
-        if self.tangent:
+        if self.simplex_tangent:
             shape[-1] -= 1
         final_shape = tuple(shape)
 
