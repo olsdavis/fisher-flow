@@ -435,15 +435,18 @@ class GeomNSphere(Manifold):
         """
         See `Manifold.parallel_transport`.
         """
-        sphere = Hypersphere(p.size(-1) - 1)
-        return torch.stack(
-            [sphere.metric.parallel_transport(v[:, i, :], base_point=p[:, i, :], end_point=q[:, i, :]) for i in range(p.size(1))],
-            dim=1,
+        direction = self.log_map(p, q)
+        theta = direction.norm(dim=-1, keepdim=True)
+        theta = torch.where(theta < 1e-8, torch.ones_like(theta), theta)
+        norm_b = direction / theta
+        pb = fast_dot(v, norm_b)
+        p_orth = v - pb * norm_b
+        transported = (
+            - theta.sin() * pb * p
+            + theta.cos() * pb * norm_b
+            + p_orth
         )
-        m = p + q
-        mnorm2 = m.square().sum(dim=-1, keepdim=True)
-        factor = 2.0 * fast_dot(v, q) / mnorm2
-        return v - m * factor
+        return transported
 
     def belongs(self, x: Tensor, eps: float = 1e-7) -> Tensor:
         """
