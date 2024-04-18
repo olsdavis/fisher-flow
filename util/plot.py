@@ -7,8 +7,8 @@ def define_style():
     """
     Sets the style up for matplotlib.
     """
-    plt.rcParams['text.usetex'] = True
-    plt.rcParams['text.latex.preamble'] = r"""\usepackage[T1]{fontenc}"""
+    # plt.rcParams['text.usetex'] = True
+    # plt.rcParams['text.latex.preamble'] = r"""\usepackage[T1]{fontenc}"""
     plt.rc("font", family="serif", weight="normal", size=16)
     sns.set_theme()
     sns.set_style(style="whitegrid")

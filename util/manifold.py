@@ -12,7 +12,7 @@ import ot
 from einops import rearrange
 
 
-from util import safe_arccos, usinc
+from util import fast_dot, safe_arccos, usinc
 
 
 def str_to_ot_method(method: str, reg: float = 0.05, reg_m: float = 1.0, loss: bool = False):
@@ -95,7 +95,7 @@ class Manifold(ABC):
         t = t.repeat(1, x_0.size(1), 1)
         return self.exp_map(x_0, t * self.log_map(x_0, x_1))
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def tangent_euler(
         self,
         x_0: Tensor,
@@ -106,9 +106,9 @@ class Manifold(ABC):
         Applies Euler integration on the manifold for the field defined
         by `model`.
         """
-        dt = 1.0 / steps
+        dt = torch.tensor(1.0 / steps, device=x_0.device)
         x = x_0
-        t = torch.zeros((x.size(0), 1), device=x_0.device)
+        t = torch.zeros((x.size(0), 1), device=x_0.device, dtype=x_0.dtype)
         for _ in range(steps):
             t += dt
             x = self.exp_map(x, self.make_tangent(x, model(x, t)) * dt)
@@ -198,8 +198,7 @@ class Manifold(ABC):
     @abstractmethod
     def make_tangent(self, p: Tensor, v: Tensor) -> Tensor:
         """
-        For an incomplete vector `v`, i.e., of shape `(b, k, d - 1)`,
-        complete each coordinate to make it tangent at `p`.
+        Projects the vector `v` on the tangent space of `p`.
         """
 
     @abstractmethod
@@ -241,12 +240,15 @@ class NSimplex(Manifold):
         """
         See `Manifold.log_map`.
         """
-        ret = torch.zeros_like(p)
+        """ret = torch.zeros_like(p)
         z = (p * q).sqrt()
         s = z.sum(dim=-1, keepdim=True)
         close = ((s.square() - 1.0).abs() < 1e-7).expand_as(ret)
         ret[~close] = (2.0 * safe_arccos(s) / (1.0 - s.square()).sqrt() * (z - s * p))[~close]
-        return ret
+        return ret"""
+        z = (p * q).sqrt()
+        s = z.sum(dim=-1, keepdim=True)
+        return 2.0 * safe_arccos(s) / (1.0 - s.square()).sqrt() * (z - s * p)
 
     def geodesic_distance(self, p: Tensor, q: Tensor) -> Tensor:
         """
@@ -281,7 +283,7 @@ class NSimplex(Manifold):
         """
         See `Manifold.make_tangent`.
         """
-        raise NotImplementedError("not implemented")
+        return v - v.mean(dim=-1, keepdim=True)
 
     def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
         """
@@ -329,25 +331,25 @@ class NSphere(Manifold):
         """
         See `Manifold.exp_map`.
         """
-        theta = self.square_norm_at(p, v).sqrt()
+        theta = v.norm(dim=-1, keepdim=True)  # norm is independent of point for sphere
         return theta.cos() * p + usinc(theta) * v
 
     def log_map(self, p: Tensor, q: Tensor) -> Tensor:
         """
         See `Manifold.log_map`.
         """
-        cos = (p * q).sum(dim=-1, keepdim=True).clamp(-1.0, 1.0)
+        cos = fast_dot(p, q).clamp(-1.0, 1.0)
         # otherwise
         theta = safe_arccos(cos)
         x = (q - cos * p) / usinc(theta)
         # X .- real(dot(p, X)) .* p
-        return x - (x * p).sum(dim=-1, keepdim=True) * p
+        return x - fast_dot(x, p) * p
 
     def geodesic_distance(self, p: Tensor, q: Tensor) -> Tensor:
         """
         See `Manifold.geodesic_distance`.
         """
-        cos = (p * q).sum(dim=-1).clamp(-1.0, 1.0)
+        cos = fast_dot(p, q, keepdim=False)
         # sum across product space
         return safe_arccos(cos).sum(dim=1)
 
@@ -355,7 +357,7 @@ class NSphere(Manifold):
         """
         See `Manifold.metric`.
         """
-        return (u * v).sum(dim=-1, keepdim=True)
+        return fast_dot(u, v)
 
     def parallel_transport(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
         """
@@ -363,14 +365,14 @@ class NSphere(Manifold):
         """
         m = p + q
         mnorm2 = m.square().sum(dim=-1, keepdim=True)
-        factor = 2.0 * (v * q).sum(dim=-1, keepdim=True) / mnorm2
+        factor = 2.0 * fast_dot(v, q) / mnorm2
         return v - m * factor
 
     def make_tangent(self, p: Tensor, v: Tensor) -> Tensor:
         """
         See `Manifold.make_tangent`.
         """
-        return (v - p * (p * v).sum(dim=-1, keepdim=True))
+        return v - p * fast_dot(p, v)
 
     def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
         """

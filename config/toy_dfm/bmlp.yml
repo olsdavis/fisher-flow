@@ -1,0 +1,6 @@
+name: BestMLP
+depth: 3
+hidden: 1024
+activation: gelu
+emb_size: 128
+batch_norm: false

@@ -105,7 +105,7 @@ def run_simple_experiment(args: dict[str, Any]):
             optimizer.step()
             losses += [loss.item()]
         print(f"Epoch {i+1} --- Loss {np.mean(losses)}")
-    with torch.no_grad():
+    with torch.inference_mode():
         x_0 = manifold.uniform_prior(1000, 1, 3).to(device)
         output = manifold.tangent_euler(x_0, model, 100)
     if args["manifold"] == "sphere":

@@ -32,6 +32,22 @@ class TestNSimplex(unittest.TestCase):
             "NaNs in log map",
         )
 
+    @torch.no_grad()
+    def test_make_tangent(self):
+        """
+        Tests whether `make_tangent` makes vectors tangent.
+        """
+        set_seeds(0)
+        m = NSimplex()
+        n_points = 10
+        points = m.uniform_prior(n_points, 1, 3)
+        vectors = torch.randn(n_points, 1, 3)
+        tangent = m.make_tangent(points, vectors)
+        testing.assert_close(
+            tangent.sum(dim=-1),
+            torch.zeros((n_points, 1)),
+        )
+
 
 class TestNSphere(unittest.TestCase):
     """Tests n-spheres."""
@@ -133,7 +149,7 @@ class TestManifoldsGeneral(unittest.TestCase):
             set_seeds(2)
             p = manifold.uniform_prior(points, seq_len, dim)
             q = manifold.uniform_prior(points, seq_len, dim)
-            v = torch.rand((points, seq_len, dim - 1))
+            v = torch.rand((points, seq_len, dim))
             v = manifold.make_tangent(p, v)
             transported = manifold.parallel_transport(p, q, v)
             if type(manifold).__name__ == "NSimplex":

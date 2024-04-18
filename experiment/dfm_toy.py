@@ -24,12 +24,41 @@ from util import (
 )
 
 
+class ToyDataset(torch.utils.data.IterableDataset):
+    """
+    Adapted from `https://github.com/HannesStark/dirichlet-flow-matching/blob/main/utils/dataset.py`.
+    """
+    def __init__(self, num_cls: int, toy_seq_len: int, toy_simplex_dim: int, sz: int = 100_000):
+        super().__init__()
+        self.num_cls = num_cls
+        self.sz = sz
+        self.seq_len = toy_seq_len
+        self.alphabet_size = toy_simplex_dim
+        self.probs = torch.softmax(torch.rand((self.num_cls, self.seq_len, self.alphabet_size)), dim=2)
+        self.class_probs = torch.ones(self.num_cls)
+        if self.num_cls > 1:
+            self.class_probs = self.class_probs * 1 / 2 / (self.num_cls - 1)
+            self.class_probs[0] = 1 / 2
+        assert self.class_probs.sum() == 1
+
+    def __len__(self):
+        return self.sz
+
+    def __iter__(self):
+        while True:
+            cls = np.random.choice(a=self.num_cls,size=1,p=self.class_probs)
+            seq = []
+            for i in range(self.seq_len):
+                seq.append(torch.multinomial(replacement=True,num_samples=1,input=self.probs[cls,i,:]))
+            yield torch.tensor(seq), cls
+
+
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 
 def _generate_raw_tensor(probas: Tensor, m: Manifold, n: int) -> Tensor:
     dist = Categorical(probas)
-    x = torch.nn.functional.one_hot(dist.sample((n,)), probas.size(-1))
+    x = nn.functional.one_hot(dist.sample((n,)), probas.size(-1))
     x = m.smooth_labels(x.float(), 0.81 if isinstance(m, NSphere) else 0.9)
     return x
 
@@ -52,12 +81,25 @@ def train(
     inference_steps: int = 100,
     args: dict[str, Any] = {},
 ) -> nn.Module:
+    """
+    Parameters:
+        - `epochs`: the number of epochs to train for;
+        - `lr`: the learning rate;
+        - `model`: the model to train;
+        - `train_loader`: the training data loader;
+        - `test_loader`: the test data loader;
+        - `wasserstein_set`: the set of points to evaluate the Wasserstein distance on;
+        - `train_method`: the training method to use;
+        - `wasserstein_every`: the number of epochs between Wasserstein evaluations;
+        - `inference_steps`: the number of steps to take for inference;
+        - `args`: the arguments.
+    """
     print(f"===== {model} / {train_method}")
     set_seeds()
     model = model.to(device)
     manifold = NSimplex() if args["manifold"] == "simplex" else NSphere()
     ot_sampler = OTSampler(manifold, "exact")
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.0)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     lr_scheduler = ReduceLROnPlateau(optimizer)
     # lr_scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-5)
     for epoch in range(epochs):
@@ -65,7 +107,7 @@ def train(
         # Wasserstein eval
         if epoch % wasserstein_every == 0 and wasserstein_set:
             model.eval()
-            with torch.no_grad():
+            with torch.inference_mode():
                 shape = wasserstein_set.shape
                 n = shape[0]
                 k = shape[1]
@@ -90,6 +132,8 @@ def train(
                 # dfm method otherwise
                 loss = dfm_train_step(x, model)
             loss.backward()
+            # clip grad norm
+            # nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             train_loss += [loss.item()]
         logs["train_loss"] = np.mean(train_loss)
@@ -99,7 +143,7 @@ def train(
         # test loss
         test_loss = []
         model.eval()
-        with torch.no_grad():
+        with torch.inference_mode():
             for x in test_loader:
                 x = x[0]
                 x = x.to(device)
@@ -127,6 +171,7 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
     epochs = 1000
     lr = 1e-3
     ds = [5, 10, 20, 40, 60, 80, 100, 120, 140, 160]
+    n_train = 100_000
     model_config = load_model_config(args["config"])
     for d in ds:
         if args["wandb"]:
@@ -135,18 +180,17 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
                 name=f"toy_dfm_{d}",
                 config={
                     "architecture": "ProductMLP",
-                    "dataset": "toy_dfm",
+                    "dataset": f"toy_dfm_{n_train}",
                 },
             )
         set_seeds()
 
         manifold = NSimplex() if args["manifold"] == "simplex" else NSphere()
-        print(type(manifold).__name__)
 
         # generate data
         # send to device for KL later
         real_probas = torch.softmax(torch.rand((seq_len, d)), dim=-1)
-        train_dataset, test_dataset = _generate_dataset(real_probas, manifold, 10000, 1000)
+        train_dataset, test_dataset = _generate_dataset(real_probas, manifold, n_train, 1000)
         # wasserstein_set = _generate_raw_tensor(real_probas, manifold, 2500).to(device)
         train_loader = DataLoader(train_dataset, batch_size=512, shuffle=True)
         test_loader = DataLoader(test_dataset, batch_size=512, shuffle=False)

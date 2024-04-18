@@ -299,7 +299,6 @@ class TembMLP(nn.Module):
             self.add_module(f"input_mlp{i}", embedding)
             positional_embeddings.append(embedding)
 
-        self.self_condition = False
         concat_size = len(self.time_mlp.layer) + sum(
             map(lambda x: len(x.layer), positional_embeddings)
         )
@@ -341,4 +340,124 @@ class TembMLP(nn.Module):
             else:
                 x = layer(x, t_emb)
         x = x.view(final_shape)
+        return x
+
+
+class GaussianFourierProjection(nn.Module):
+    """
+    Gaussian random features for encoding time steps.
+
+    From `https://github.com/HannesStark/dirichlet-flow-matching/blob/main/model/promoter_model.py`.
+    """
+
+    def __init__(self, embed_dim, scale=30.):
+        super().__init__()
+        # Randomly sample weights during initialization. These weights are fixed
+        # during optimization and are not trainable.
+        self.W = nn.Parameter(torch.randn(embed_dim // 2) * scale, requires_grad=False)
+
+    def forward(self, x):
+        """Forward through."""
+        x_proj = x[:, None] * self.W[None, :] * 2.0 * torch.pi
+        return torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1)
+
+
+class BestBlock(nn.Module):
+    """A block for BestMLP."""
+
+    def __init__(
+        self,
+        in_dim: int,
+        out_dim: int,
+        time_dim: int,
+        resid: bool = True,
+        act: nn.Module | None = None,
+        b_norm: bool | None = False,
+    ):
+        """
+        Parameters:
+            - `in_dim`: the input dimension, excluding time;
+            - `out_dim`: the output dimension;
+            - `time_dim`: the time dimension;
+            - `resid`: whether to use residual connections;
+            - `act`: the activation function to use.
+        """
+        super().__init__()
+        assert not resid or in_dim == out_dim, "Residual connections require in_dim == out_dim"
+        self.resid = resid
+        self.act = act
+        self.net = nn.Linear(in_dim + time_dim, out_dim)
+        self.b_norm = nn.BatchNorm1d(out_dim) if b_norm else None
+
+    def forward(self, x: Tensor, t: Tensor) -> Tensor:
+        """Forward pass."""
+        x_t = torch.cat([x, t], dim=-1)
+        out = self.net(x_t)
+        if self.act:
+            out = self.act(out)
+        if self.b_norm:
+            out = self.b_norm(out)
+        if self.resid:
+            out = out + x
+        return out
+
+
+class BestMLP(nn.Module):
+    """
+    Defines an MLP with only time embeddings.
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        k: int,
+        hidden: int,
+        depth: int,
+        emb_size: int,
+        activation: str = "lrelu",
+        batch_norm: bool = False,
+        **_,
+    ):
+        """
+        Parameters:
+            - `dim`: the dimension of each simplex;
+            - `k`: the number of simplices in the product;
+            - `hidden`: the hidden dimension;
+            - `depth`: the depth of the network;
+            - `emb_size`: the size of the embedding.
+
+        Other arguments are ignored.
+        """
+        assert emb_size > 0, "emb_size must be positive"
+        super().__init__()
+        act = str_to_activation(activation)
+        self.time_embedding = nn.Sequential(
+            # SinusoidalEmbedding(emb_size, scale=25.0),
+            nn.Linear(1, emb_size),
+        )
+        layers: list[nn.Module] = []
+        fd = k * dim
+        for i in range(depth):
+            ind = fd if i == 0 else hidden
+            out = hidden if i < depth - 1 else fd
+            layers += [
+                BestBlock(
+                    ind,
+                    out,
+                    emb_size,
+                    act=act if i < depth - 1 else None,
+                    resid=ind == out,
+                    b_norm=batch_norm and i < depth - 1,
+                ),
+            ]
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x: Tensor, t: Tensor) -> Tensor:
+        """Forward pass."""
+        final_shape = x.shape
+        x = x.view((x.size(0), -1))
+        emb = self.time_embedding(t)
+        for layer in self.net:
+            x = layer(x, emb)
+        x = x.reshape(final_shape)
         return x

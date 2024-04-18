@@ -3,27 +3,24 @@ import torch
 from torch import Tensor
 
 
-def usinc(theta: Tensor, eps: float = 1e-8) -> Tensor:
+@torch.jit.script
+def usinc(theta: Tensor) -> Tensor:
     """Unnormalized sinc."""
-    return torch.where(
-        torch.abs(theta) < eps,
-        1.0,  # sinc(0) = 1, by definition
-        torch.where(
-            torch.isinf(theta),
-            0.0,  # 0 at infinity
-            theta.sin() / theta,
-        )
-    )
+    return torch.sinc(theta / torch.pi)
 
 
-def safe_arccos(x: Tensor, eps: float = 1e-6) -> Tensor:
+@torch.jit.script
+def safe_arccos(x: Tensor) -> Tensor:
     """A safe version of `x.arccos()`."""
-    return torch.where(
-        torch.abs(x - 1.0) < eps,
-        torch.zeros_like(x, device=x.device),
-        torch.where(
-            torch.abs(x + 1.0) < eps,
-            torch.ones_like(x, device=x.device) * torch.pi,
-            x.arccos(),
-        )
-    )
+    return x.clamp(-1.0, 1.0).acos()
+
+
+__f_dot = torch.vmap(torch.vmap(torch.dot))
+
+
+def fast_dot(p: Tensor, q: Tensor, keepdim: bool = True) -> Tensor:
+    """A faster and unified version of dot products."""
+    ret = __f_dot(p, q)
+    if keepdim:
+        ret = ret.unsqueeze(-1)
+    return ret

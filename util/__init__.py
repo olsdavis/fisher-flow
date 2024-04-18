@@ -1,5 +1,6 @@
 """Utils for the entire project."""
 from .maths import (
+    fast_dot,
     safe_arccos,
     usinc,
 )
@@ -17,6 +18,7 @@ from .misc import (
     reset_memory,
 )
 from .model import (
+    BestMLP,
     ProductMLP,
     TembMLP,
     str_to_activation,

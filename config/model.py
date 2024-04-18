@@ -1,7 +1,7 @@
 """Config files for models."""
 from dataclasses import dataclass, asdict
 from torch import nn
-from util import ProductMLP, TembMLP
+from util import BestMLP, ProductMLP, TembMLP
 from .general import _load_config_raw
 
 
@@ -19,6 +19,7 @@ class ModelConfig:
     input_emb: str | None = "sinusoidal"
     add_t_emb: bool | None = False
     concat_t_emb: bool | None = False
+    batch_norm: bool | None = False
     # k, d defined by task
 
 
@@ -47,6 +48,7 @@ def model_from_config(
     models_available = {
         "ProductMLP": ProductMLP,
         "TembMLP": TembMLP,
+        "BestMLP": BestMLP,
     }
     return models_available[config.name](
         k=k,

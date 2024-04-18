@@ -16,7 +16,7 @@ def set_seeds(seed: int = 0):
     np.random.seed(seed)
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def estimate_categorical_kl(
     model: nn.Module,
     manifold: Manifold,
@@ -24,7 +24,7 @@ def estimate_categorical_kl(
     n: int,
     batch: int = 512,
     inference_steps: int = 100,
-    sampling_mode: str = "sample",
+    sampling_mode: str = "max",
 ) -> float:
     """
     Estimates the categorical KL divergence between points produced by the
@@ -41,13 +41,12 @@ def estimate_categorical_kl(
         - `sampling_mode`: how to sample points; if "sample", then samples
             from the distribution produced by the model; if "max" then takes
             the argmax of the distribution.
-    
+
     Returns:
         An estimate of the KL divergence of the model's distribution from
         the real distribution, i.e., "KL(model || real_dist)".
     """
     assert sampling_mode in ["sample", "max"], "not a valid sampling mode"
-
     # init acc
     acc = torch.zeros_like(real_dist, device=real_dist.device)
 
@@ -65,7 +64,7 @@ def estimate_categorical_kl(
             samples = dist.sample()
             acc += samples.sum(dim=0)
         else:
-            samples = torch.nn.functional.one_hot(
+            samples = nn.functional.one_hot(
                 x_1.argmax(dim=-1),
                 real_dist.size(-1),
             )

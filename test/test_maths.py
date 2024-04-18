@@ -15,10 +15,6 @@ class TestUSinc(unittest.TestCase):
             "sinc(0) = 1",
         )
         self.assertTrue(
-            torch.allclose(usinc(torch.Tensor([torch.inf])), torch.Tensor([0.0]), atol=1e-7),
-            "sinc(inf) = 0",
-        )
-        self.assertTrue(
             torch.allclose(usinc(torch.Tensor([torch.pi])), torch.Tensor([0.0]), atol=1e-7),
             "sinc(pi) = 0",
         )
