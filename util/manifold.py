@@ -10,6 +10,8 @@ from torch.distributions import Dirichlet
 from torch import Tensor, nn
 import ot
 from einops import rearrange
+from geomstats.geometry.hypersphere import Hypersphere
+from geomstats.geometry.product_manifold import ProductManifold
 
 
 from util import fast_dot, safe_arccos, usinc
@@ -219,6 +221,32 @@ class Manifold(ABC):
         Sends the points `x` to the manifold `m`.
         """
 
+    @abstractmethod
+    def belongs(self, x: Tensor, eps: float = 1e-7) -> Tensor:
+        """
+        Returns a Tensor that indicates whether each point belongs to the manifold.
+        """
+
+    def all_belong(self, x: Tensor, eps: float = 1e-7) -> Tensor:
+        """
+        Returns `True` iff all points belong to the manifold.
+        """
+        return self.belongs(x, eps).all()
+
+    @abstractmethod
+    def belongs_tangent(self, x: Tensor, v: Tensor, eps: float = 1e-7) -> Tensor:
+        """
+        Returns a Tensor that indicates whether each tangent vector
+        belongs to the tangent space of the manifold at point `x`.
+        """
+
+    def all_belong_tangent(self, x: Tensor, v: Tensor, eps: float = 1e-7) -> Tensor:
+        """
+        Returns `True` iff all tangent vectors belong to the tangent space of the manifold
+        at point `x`.
+        """
+        return self.belongs_tangent(x, v, eps).all()
+
 
 class NSimplex(Manifold):
     """
@@ -319,11 +347,121 @@ class NSimplex(Manifold):
             return x
         raise NotImplementedError(f"unimplemented for {m}")
 
+    def belongs(self, x: Tensor, eps: float = 1e-7) -> Tensor:
+        """
+        See `Manifold.belongs`.
+        """
+        return (x.sum(dim=-1) - 1.0).abs() < eps
+
+    def belongs_tangent(self, x: Tensor, v: Tensor, eps: float = 1e-7) -> Tensor:
+        """
+        See `Manifold.belongs_tangent`.
+        """
+        return v.sum(dim=-1).abs() < eps
+
+
+class GeomNSphere(Manifold):
+    """
+    Wrapper for geomstats functions.
+    """
+
+    def __init__(self, k: int, d: int):
+        """
+        Parameters:
+            - `k`: the number of spheres in the product;
+            - `d`: the dimension of each sphere.
+        """
+        self.underlying = ProductManifold([Hypersphere(d - 1) for _ in range(k)], equip=True)
+
+    def exp_map(self, p: Tensor, v: Tensor) -> Tensor:
+        """
+        See `Manifold.exp_map`.
+        """
+        return self.underlying.metric.exp(v, p)
+
+    def log_map(self, p: Tensor, q: Tensor) -> Tensor:
+        """
+        See `Manifold.log_map`.
+        """
+        return self.underlying.metric.log(point=q, base_point=p)
+
+    def geodesic_distance(self, p: Tensor, q: Tensor) -> Tensor:
+        """
+        See `Manifold.geodesic_distance`.
+        """
+        return self.underlying.metric.dist(p, q)
+
+    def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
+        """
+        See `Manifold.uniform_prior`.
+        """
+        return self.underlying.random_point(n).abs()
+
+    def smooth_labels(self, labels: Tensor, mx: float = 0.98) -> Tensor:
+        """
+        See `Manifold.smooth_labels`.
+        """
+        return NSimplex().send_to(NSimplex().smooth_labels(labels, mx), NSphere)
+
+    def send_to(self, x: Tensor, m: type[Manifold]) -> Tensor:
+        """
+        See `Manifold.send_to`.
+        """
+        if m == NSphere:
+            return x
+        elif m == NSimplex:
+            return x.square()
+        raise NotImplementedError(f"unimplemented for {m}")
+
+    def make_tangent(self, p: Tensor, v: Tensor) -> Tensor:
+        """
+        See `Manifold.make_tangent`.
+        """
+        return self.underlying.to_tangent(v, p)
+
+    def metric(self, x: Tensor, u: Tensor, v: Tensor) -> Tensor:
+        """
+        See `Manifold.metric`.
+        """
+        return self.underlying.metric.inner_product(u, v, x).unsqueeze(-1)
+
+    def square_norm_at(self, x: Tensor, v: Tensor) -> Tensor:
+        """
+        See `Manifold.square_norm_at`.
+        """
+        return self.underlying.metric.squared_norm(v, base_point=x).unsqueeze(-1)
+
+    def parallel_transport(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
+        """
+        See `Manifold.parallel_transport`.
+        """
+        sphere = Hypersphere(p.size(-1) - 1)
+        return torch.stack(
+            [sphere.metric.parallel_transport(v[:, i, :], base_point=p[:, i, :], end_point=q[:, i, :]) for i in range(p.size(1))],
+            dim=1,
+        )
+        m = p + q
+        mnorm2 = m.square().sum(dim=-1, keepdim=True)
+        factor = 2.0 * fast_dot(v, q) / mnorm2
+        return v - m * factor
+
+    def belongs(self, x: Tensor, eps: float = 1e-7) -> Tensor:
+        """
+        See `Manifold.belongs`.
+        """
+        return self.underlying.belongs(x)
+
+    def belongs_tangent(self, x: Tensor, v: Tensor, eps: float = 1e-7) -> Tensor:
+        """
+        See `Manifold.belongs_tangent`.
+        """
+        return self.underlying.is_tangent(v, base_point=x)
+
 
 class NSphere(Manifold):
     """
     Defines an n-dimensional sphere.
-    
+
     Based on: `https://juliamanifolds.github.io`.
     """
 
@@ -331,7 +469,7 @@ class NSphere(Manifold):
         """
         See `Manifold.exp_map`.
         """
-        theta = v.norm(dim=-1, keepdim=True)  # norm is independent of point for sphere
+        theta = v.norm(dim=-1, keepdim=True, p=2)  # norm is independent of point for sphere
         return theta.cos() * p + usinc(theta) * v
 
     def log_map(self, p: Tensor, q: Tensor) -> Tensor:
@@ -386,7 +524,7 @@ class NSphere(Manifold):
         """
         See `Manifold.smooth_labels`.
         """
-        return self.send_to(NSimplex().smooth_labels(labels, mx), NSphere)
+        return NSimplex().send_to(NSimplex().smooth_labels(labels, mx), NSphere)
 
     def send_to(self, x: Tensor, m: type[Manifold]) -> Tensor:
         """
@@ -397,3 +535,28 @@ class NSphere(Manifold):
         elif m == NSimplex:
             return x.square()
         raise NotImplementedError(f"unimplemented for {m}")
+
+    def belongs(self, x: Tensor, eps: float = 1e-7) -> Tensor:
+        """
+        See `Manifold.belongs`.
+        """
+        return (x.square().sum(dim=-1) - 1.0).abs() < eps
+
+    def belongs_tangent(self, x: Tensor, v: Tensor, eps: float = 1e-7) -> Tensor:
+        """
+        See `Manifold.belongs_tangent`.
+        """
+        return fast_dot(x, v).abs() < eps
+
+
+def manifold_from_name(name: str, k: int, d: int) -> Manifold:
+    """
+    Returns the manifold corresponding to `name`.
+    """
+    if name == "sphere":
+        return NSphere()
+    elif name == "simplex":
+        return NSimplex()
+    elif name == "old-sphere":
+        return GeomNSphere(k, d)
+    raise ValueError(f"Unknown manifold: {name}")

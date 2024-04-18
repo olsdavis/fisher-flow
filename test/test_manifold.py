@@ -84,7 +84,21 @@ class TestNSphere(unittest.TestCase):
         v = torch.Tensor([[[0.1, 0.2, 0.3, 0.1]]])
         tangent = m.make_tangent(x, v)
         testing.assert_close(
-            (tangent * x).sum(), torch.tensor(0.0)
+            (tangent * x).sum(), torch.tensor(0.0),
+        )
+
+    @torch.no_grad()
+    def test_n_sphere_parallel_transport(self):
+        """
+        Tests the parallel transport function.
+        """
+        set_seeds(4)
+        m = NSphere()
+        p = m.uniform_prior(500, 16, 10)
+        v = m.make_tangent(p, torch.randn(500, 16, 10))
+        testing.assert_close(
+            m.parallel_transport(p, p, v),
+            v,
         )
 
     @torch.no_grad()
@@ -107,7 +121,34 @@ class TestManifoldsGeneral(unittest.TestCase):
 
     def __init__(self, *args):
         super().__init__(*args)
+        self.seq_len = 4
+        self.dim = 160
         self.manifolds = [NSimplex(), NSphere()]
+
+    @torch.no_grad()
+    def test_uniform_prior(self):
+        """
+        Tests whether the uniform prior has points all on the manifold.
+        """
+        for manifold in self.manifolds:
+            set_seeds(0)
+            x = manifold.uniform_prior(1000, self.seq_len, self.dim)
+            self.assertTrue(
+                manifold.all_belong(x), "all points from prior must belong to manifold"
+            )
+
+    @torch.no_grad()
+    def test_belongs(self):
+        """
+        Tests whether the belongs function is correct.
+        """
+        for manifold in self.manifolds:
+            for d in range(5, 100, 5):
+                set_seeds(d)
+                x = torch.nn.functional.one_hot(torch.randint(0, d, (10, self.seq_len)), d)
+                self.assertTrue(
+                    manifold.all_belong(x), "all one-hot encoded points must be on simplex"
+                )
 
     @torch.no_grad()
     def test_symmetric_geodesic(self):
@@ -116,8 +157,8 @@ class TestManifoldsGeneral(unittest.TestCase):
         """
         for manifold in self.manifolds:
             set_seeds(0)
-            x = manifold.uniform_prior(500, 3, 3)
-            y = manifold.uniform_prior(500, 3, 3)
+            x = manifold.uniform_prior(500, self.seq_len, self.dim)
+            y = manifold.uniform_prior(500, self.seq_len, self.dim)
             testing.assert_close(manifold.geodesic_distance(x, y), manifold.geodesic_distance(y, x))
 
     @torch.no_grad()
@@ -125,12 +166,10 @@ class TestManifoldsGeneral(unittest.TestCase):
         """
         Tests whether the log and exp maps are inverses.
         """
-        seq_len = 4
-        dim = 160
         for manifold in self.manifolds:
             set_seeds(1)
-            x = manifold.uniform_prior(500, seq_len, dim)
-            y = manifold.uniform_prior(500, seq_len, dim)
+            x = manifold.uniform_prior(500, self.seq_len, self.dim)
+            y = manifold.uniform_prior(500, self.seq_len, self.dim)
             back = manifold.exp_map(x, manifold.log_map(x, y))
             # TODO is 1e-7 good enough?
             testing.assert_close(
@@ -142,8 +181,8 @@ class TestManifoldsGeneral(unittest.TestCase):
         """
         Tests whether parallel transport retains tangency.
         """
-        dim = 160
-        seq_len = 4
+        dim = self.dim
+        seq_len = self.seq_len
         points = 500
         for manifold in self.manifolds:
             set_seeds(2)
@@ -162,8 +201,8 @@ class TestManifoldsGeneral(unittest.TestCase):
             elif type(manifold).__name__ == "NSphere":
                 testing.assert_close(
                     (transported * q).sum(dim=-1),
-                    torch.full((points, seq_len), 1e-8),
-                    atol=1e-3,
+                    torch.zeros(points, seq_len),
+                    atol=1e-12,
                     rtol=1e-5,
                 )
 
