@@ -180,7 +180,7 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
     epochs = 1000
     lr = 1e-3
     ds = [5, 10, 20, 40, 60, 80, 100, 120, 140, 160]
-    n_train = 1000000
+    n_train = 100_000
     model_config = load_model_config(args["config"])
     for d in ds:
         if args["wandb"]:
@@ -204,8 +204,8 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
                 # toy_simplex_dim=d, sz=100000)
         # test_dataset = train_dataset
         # wasserstein_set = _generate_raw_tensor(real_probas, manifold, 2500).to(device)
-        train_loader = DataLoader(train_dataset, batch_size=args.batch_size, num_workers=6, shuffle=True)
-        test_loader = DataLoader(test_dataset, batch_size=args.batch_size, num_workers=6, shuffle=False)
+        train_loader = DataLoader(train_dataset, batch_size=args['batch_size'], num_workers=6, shuffle=True)
+        test_loader = DataLoader(test_dataset, batch_size=args['batch_size'], num_workers=6, shuffle=False)
         # train_loader = DataLoader(train_dataset, batch_size=512)
         # test_loader = DataLoader(test_dataset, batch_size=512)
 
