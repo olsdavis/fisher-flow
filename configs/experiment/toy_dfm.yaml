@@ -5,7 +5,7 @@
 
 defaults:
   - override /data: toy_dfm
-  - override /model: bmlp
+  - override /model: toy_cnn_model
   - override /callbacks: default
   - override /trainer: default
 
@@ -37,6 +37,6 @@ data:
 logger:
   wandb:
     tags: ${tags}
-    group: "mnist"
+    group: "toy_dfm"
   aim:
-    experiment: "mnist"
+    experiment: "toy_dfm"
