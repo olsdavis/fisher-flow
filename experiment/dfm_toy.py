@@ -14,15 +14,20 @@ from config import (
 )
 from util import (
     Manifold,
-    NSimplex,
     NSphere,
     OTSampler,
     dfm_train_step,
     estimate_categorical_kl,
+    manifold_from_name,
     ot_train_step,
     reset_memory,
     set_seeds,
 )
+
+
+# set default dtype
+torch.set_default_dtype(torch.float32)
+torch.set_default_tensor_type('torch.cuda.FloatTensor')
 
 
 class ToyDataset(torch.utils.data.IterableDataset):
@@ -65,7 +70,7 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 def _generate_raw_tensor(probas: Tensor, m: Manifold, n: int) -> Tensor:
     dist = Categorical(probas)
     x = nn.functional.one_hot(dist.sample((n,)), probas.size(-1))
-    x = m.smooth_labels(x.float(), 0.81 if isinstance(m, NSphere) else 0.9)
+    x = m.smooth_labels(x.float(), 0.9 if isinstance(m, NSphere) else 0.9)
     return x
 
 
@@ -80,11 +85,12 @@ def train(
     model: nn.Module,
     train_loader: DataLoader,
     test_loader: DataLoader,
+    manifold: Manifold,
     wasserstein_set: Tensor | None,
     train_method: str,
     wasserstein_every: int = 10,
     inference_steps: int = 100,
-    args: dict[str, Any] = {},
+    args: dict[str, Any] | None = None,
 ) -> nn.Module:
     """
     Parameters:
@@ -93,6 +99,7 @@ def train(
         - `model`: the model to train;
         - `train_loader`: the training data loader;
         - `test_loader`: the test data loader;
+        - `manifold`: the manifold;
         - `wasserstein_set`: the set of points to evaluate the Wasserstein distance on;
         - `train_method`: the training method to use;
         - `wasserstein_every`: the number of epochs between Wasserstein evaluations;
@@ -102,7 +109,6 @@ def train(
     print(f"===== {model} / {train_method}")
     set_seeds()
     model = model.to(device)
-    manifold = NSimplex() if args["manifold"] == "simplex" else NSphere()
     ot_sampler = OTSampler(manifold, "exact")
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     lr_scheduler = ReduceLROnPlateau(optimizer)
@@ -164,6 +170,7 @@ def train(
                 test_loss += [loss.item()]
                 i = i + 1
         logs["test_loss"] = np.mean(test_loss)
+        logs["lr"] = lr_scheduler.get_last_lr()[0]
         print(f"--- Epoch {epoch+1:03d}/{epochs:03d}: train loss = {np.mean(train_loss):.5f};"\
               f" test loss = {np.mean(test_loss):.5f}")
         if args["wandb"]:
@@ -179,22 +186,23 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
     seq_len = 4
     epochs = 1000
     lr = 1e-3
-    ds = [5, 10, 20, 40, 60, 80, 100, 120, 140, 160]
+    ds = [100, 120, 140, 160]
     n_train = 100_000
     model_config = load_model_config(args["config"])
     for d in ds:
         if args["wandb"]:
+            m_name = args["manifold"]
             wandb.init(
                 project="simplex-flow-matching",
-                name=f"toy_dfm_{d}",
+                name=f"{m_name}_{d}_{model_config.name}",
                 config={
-                    "architecture": "ProductMLP",
+                    "architecture": model_config.name,
                     "dataset": f"toy_dfm_{n_train}",
                 },
             )
         set_seeds()
 
-        manifold = NSimplex() if args["manifold"] == "simplex" else NSphere()
+        manifold = manifold_from_name(args["manifold"], seq_len, d)
 
         # generate data
         # send to device for KL later
@@ -204,10 +212,8 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
                 # toy_simplex_dim=d, sz=100000)
         # test_dataset = train_dataset
         # wasserstein_set = _generate_raw_tensor(real_probas, manifold, 2500).to(device)
-        train_loader = DataLoader(train_dataset, batch_size=args['batch_size'], num_workers=6, shuffle=True)
-        test_loader = DataLoader(test_dataset, batch_size=args['batch_size'], num_workers=6, shuffle=False)
-        # train_loader = DataLoader(train_dataset, batch_size=512)
-        # test_loader = DataLoader(test_dataset, batch_size=512)
+        train_loader = DataLoader(train_dataset, batch_size=512, shuffle=True, generator=torch.Generator(device='cuda'),)
+        test_loader = DataLoader(test_dataset, batch_size=512, shuffle=False)
 
         # start
         print(f"---=== {d}-simplices ===---")
@@ -221,6 +227,7 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
             ),
             train_loader,
             test_loader,
+            manifold,
             wasserstein_set=None,
             train_method=args["train_method"],
             inference_steps=args["inference_steps"],

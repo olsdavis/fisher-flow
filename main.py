@@ -19,7 +19,7 @@ def main():
         description="Experiments for SFM paper",
     )
     # What manifold to use?
-    parser.add_argument("--manifold", "-m", type=str, default="simplex", choices=["simplex", "sphere"])
+    parser.add_argument("--manifold", "-m", type=str, default="simplex", choices=["simplex", "sphere", "old-sphere"])
     # What experiment to run?
     parser.add_argument("--experiment", "-e", type=str, choices=experiments_available.keys())
     # How many steps to use in inference? (Used also for KL, for instance.)

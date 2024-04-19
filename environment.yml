@@ -15,3 +15,4 @@ dependencies:
     - dirichlet==0.9
     - einops==0.7.0
     - wandb==0.16.5
+    - geomstats==2.7.0
