@@ -2,7 +2,7 @@
 import unittest
 import torch
 from torch import testing
-from util import NSimplex, NSphere, set_seeds
+from src.sfm import NSimplex, NSphere, set_seeds
 
 
 class TestNSimplex(unittest.TestCase):

@@ -10,11 +10,9 @@ from torch.distributions import Dirichlet
 from torch import Tensor, nn
 import ot
 from einops import rearrange
-from geomstats.geometry.hypersphere import Hypersphere
-from geomstats.geometry.product_manifold import ProductManifold
 
 
-from util import fast_dot, safe_arccos, usinc
+from src.sfm import fast_dot, safe_arccos, usinc
 
 
 def str_to_ot_method(method: str, reg: float = 0.05, reg_m: float = 1.0, loss: bool = False):
@@ -360,107 +358,6 @@ class NSimplex(Manifold):
         return v.sum(dim=-1).abs() < eps
 
 
-class GeomNSphere(Manifold):
-    """
-    Wrapper for geomstats functions.
-    """
-
-    def __init__(self, k: int, d: int):
-        """
-        Parameters:
-            - `k`: the number of spheres in the product;
-            - `d`: the dimension of each sphere.
-        """
-        self.underlying = ProductManifold([Hypersphere(d - 1) for _ in range(k)], equip=True)
-
-    def exp_map(self, p: Tensor, v: Tensor) -> Tensor:
-        """
-        See `Manifold.exp_map`.
-        """
-        return self.underlying.metric.exp(v, p)
-
-    def log_map(self, p: Tensor, q: Tensor) -> Tensor:
-        """
-        See `Manifold.log_map`.
-        """
-        return self.underlying.metric.log(point=q, base_point=p)
-
-    def geodesic_distance(self, p: Tensor, q: Tensor) -> Tensor:
-        """
-        See `Manifold.geodesic_distance`.
-        """
-        return self.underlying.metric.dist(p, q)
-
-    def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
-        """
-        See `Manifold.uniform_prior`.
-        """
-        return self.underlying.random_point(n).abs()
-
-    def smooth_labels(self, labels: Tensor, mx: float = 0.98) -> Tensor:
-        """
-        See `Manifold.smooth_labels`.
-        """
-        return NSimplex().send_to(NSimplex().smooth_labels(labels, mx), NSphere)
-
-    def send_to(self, x: Tensor, m: type[Manifold]) -> Tensor:
-        """
-        See `Manifold.send_to`.
-        """
-        if m == NSphere:
-            return x
-        elif m == NSimplex:
-            return x.square()
-        raise NotImplementedError(f"unimplemented for {m}")
-
-    def make_tangent(self, p: Tensor, v: Tensor) -> Tensor:
-        """
-        See `Manifold.make_tangent`.
-        """
-        return self.underlying.to_tangent(v, p)
-
-    def metric(self, x: Tensor, u: Tensor, v: Tensor) -> Tensor:
-        """
-        See `Manifold.metric`.
-        """
-        return self.underlying.metric.inner_product(u, v, x).unsqueeze(-1)
-
-    def square_norm_at(self, x: Tensor, v: Tensor) -> Tensor:
-        """
-        See `Manifold.square_norm_at`.
-        """
-        return self.underlying.metric.squared_norm(v, base_point=x).unsqueeze(-1)
-
-    def parallel_transport(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
-        """
-        See `Manifold.parallel_transport`.
-        """
-        direction = self.log_map(p, q)
-        theta = direction.norm(dim=-1, keepdim=True)
-        theta = torch.where(theta < 1e-8, torch.ones_like(theta), theta)
-        norm_b = direction / theta
-        pb = fast_dot(v, norm_b)
-        p_orth = v - pb * norm_b
-        transported = (
-            - theta.sin() * pb * p
-            + theta.cos() * pb * norm_b
-            + p_orth
-        )
-        return transported
-
-    def belongs(self, x: Tensor, eps: float = 1e-7) -> Tensor:
-        """
-        See `Manifold.belongs`.
-        """
-        return self.underlying.belongs(x)
-
-    def belongs_tangent(self, x: Tensor, v: Tensor, eps: float = 1e-7) -> Tensor:
-        """
-        See `Manifold.belongs_tangent`.
-        """
-        return self.underlying.is_tangent(v, base_point=x)
-
-
 class NSphere(Manifold):
     """
     Defines an n-dimensional sphere.
@@ -552,7 +449,7 @@ class NSphere(Manifold):
         return fast_dot(x, v).abs() < eps
 
 
-def manifold_from_name(name: str, k: int, d: int) -> Manifold:
+def manifold_from_name(name: str) -> Manifold:
     """
     Returns the manifold corresponding to `name`.
     """
@@ -560,6 +457,4 @@ def manifold_from_name(name: str, k: int, d: int) -> Manifold:
         return NSphere()
     elif name == "simplex":
         return NSimplex()
-    elif name == "old-sphere":
-        return GeomNSphere(k, d)
     raise ValueError(f"Unknown manifold: {name}")

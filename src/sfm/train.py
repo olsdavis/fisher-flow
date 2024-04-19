@@ -2,7 +2,7 @@
 import torch
 from torch.distributions.dirichlet import Dirichlet
 from torch import Tensor, nn
-from util import Manifold, OTSampler
+from src.sfm import Manifold, OTSampler
 
 
 def dfm_train_step(
@@ -32,9 +32,10 @@ def ot_train_step(
     model: nn.Module,
     sampler: OTSampler | None,
     time_eps: float = 0.0,
-) -> Tensor:
+) -> tuple[Tensor, Tensor, Tensor]:
     """
-    Returns the loss for a single (OT-)CFT training step.
+    Returns the loss for a single (OT-)CFT training step along with the
+    model's output and the target vector.
 
     Parameters:
         - `x_1`: batch of data points;
@@ -58,7 +59,7 @@ def cft_loss_function(
     m: Manifold,
     model: nn.Module,
     sampler: OTSampler | None,
-) -> Tensor:
+) -> tuple[Tensor, Tensor, Tensor]:
     """
     Our CFT loss function. If `sampler` is provided, OT-CFT loss is calculated.
 
@@ -71,7 +72,7 @@ def cft_loss_function(
         - `sampler` (optional): the sampler for the OT plan.
     
     Returns:
-        The loss tensor.
+        The loss tensor, the model output, and the target vector.
     """
     if sampler:
         x_0, x_1 = sampler.sample_plan(x_0, x_1)
@@ -85,4 +86,4 @@ def cft_loss_function(
     diff = out - target
     loss = m.square_norm_at(x_t, diff)
     loss = loss.sum(dim=1)
-    return loss.mean()
+    return loss.mean(), out, target

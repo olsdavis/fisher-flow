@@ -3,7 +3,6 @@ from dataclasses import dataclass, asdict
 from torch import nn
 from util import BestMLP, ProductMLP, TembMLP, CNNModel
 from .general import _load_config_raw
-import ipdb
 
 
 @dataclass

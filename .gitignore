@@ -3,3 +3,6 @@ out/
 *.out
 wandb/
 slurm/
+./data/
+.pytest_cache/
+logs/

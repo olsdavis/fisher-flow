@@ -30,6 +30,17 @@ dependencies:
   - rich=13.*
   - pre-commit=3.*
   - pytest=7.*
+  # ours
+  - matplotlib=3.7.1
+  - seaborn=0.12.2
+  - pip:
+    - torch==2.1.0
+    - POT==0.9.3
+    - dirichlet==0.9
+    - einops==0.7.0
+    - wandb==0.16.5
+    - geomstats==2.7.0
+    - ipdb==0.13.13
 
   # --------- loggers --------- #
   # - wandb

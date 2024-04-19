@@ -4,7 +4,7 @@ import torch
 from torch import Tensor, nn
 from torch.distributions.dirichlet import Dirichlet
 import numpy as np
-from util import Manifold, NSimplex
+from src.sfm import Manifold, NSimplex
 
 
 def set_seeds(seed: int = 0):

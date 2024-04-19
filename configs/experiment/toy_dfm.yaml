@@ -4,8 +4,8 @@
 # python train.py experiment=example
 
 defaults:
-  - override /data: mnist
-  - override /model: mnist
+  - override /data: toy_dfm
+  - override /model: bmlp
   - override /callbacks: default
   - override /trainer: default
 
@@ -23,15 +23,16 @@ trainer:
 
 model:
   optimizer:
-    lr: 0.002
+    lr: 0.001
   net:
-    lin1_size: 128
-    lin2_size: 256
-    lin3_size: 64
+    k: ${data.k}
+    dim: ${data.dim}
   compile: false
 
 data:
-  batch_size: 64
+  batch_size: 512
+  k: 4
+  dim: 100
 
 logger:
   wandb:

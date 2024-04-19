@@ -4,7 +4,7 @@ import ot
 from torch import Tensor
 
 
-from util import Manifold, str_to_ot_method
+from src.sfm import Manifold, str_to_ot_method
 
 
 class OTSampler:

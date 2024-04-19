@@ -1,7 +1,7 @@
 """Testing maths functions."""
 import unittest
 import torch
-from util import safe_arccos, usinc
+from src.sfm import safe_arccos, usinc
 
 
 class TestUSinc(unittest.TestCase):
