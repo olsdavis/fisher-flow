@@ -1,8 +1,9 @@
 """Config files for models."""
 from dataclasses import dataclass, asdict
 from torch import nn
-from util import BestMLP, ProductMLP, TembMLP
+from util import BestMLP, ProductMLP, TembMLP, CNNModel
 from .general import _load_config_raw
+import ipdb
 
 
 @dataclass
@@ -20,6 +21,15 @@ class ModelConfig:
     add_t_emb: bool | None = False
     concat_t_emb: bool | None = False
     batch_norm: bool | None = False
+    clean_data: bool | None = False
+    classifier: bool | None = False
+    classifier_free_guidance: bool | None = False
+    cls_expanded_simplex: bool | None = False
+    num_cls: int | None = 3
+    mode: str | None = "dirichlet"
+    dropout: float | None = 0.0
+    prior_pseudocount: float | None = 2.0
+
     # k, d defined by task
 
 
@@ -49,6 +59,7 @@ def model_from_config(
         "ProductMLP": ProductMLP,
         "TembMLP": TembMLP,
         "BestMLP": BestMLP,
+        "CNNModel": CNNModel,
     }
     return models_available[config.name](
         k=k,

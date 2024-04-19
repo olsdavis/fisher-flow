@@ -7,6 +7,7 @@ from torch.utils.data import Dataset, DataLoader, TensorDataset
 from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingLR
 import numpy as np
 import wandb
+import ipdb
 from config import (
     load_model_config,
     model_from_config,
@@ -33,8 +34,9 @@ class ToyDataset(torch.utils.data.IterableDataset):
     """
     Adapted from `https://github.com/HannesStark/dirichlet-flow-matching/blob/main/utils/dataset.py`.
     """
-    def __init__(self, num_cls: int, toy_seq_len: int, toy_simplex_dim: int, sz: int = 100_000):
+    def __init__(self, manifold, num_cls: int, toy_seq_len: int, toy_simplex_dim: int, sz: int = 100_000):
         super().__init__()
+        self.m = manifold
         self.num_cls = num_cls
         self.sz = sz
         self.seq_len = toy_seq_len
@@ -54,8 +56,12 @@ class ToyDataset(torch.utils.data.IterableDataset):
             cls = np.random.choice(a=self.num_cls,size=1,p=self.class_probs)
             seq = []
             for i in range(self.seq_len):
-                seq.append(torch.multinomial(replacement=True,num_samples=1,input=self.probs[cls,i,:]))
-            yield torch.tensor(seq), cls
+                sample = torch.multinomial(replacement=True,num_samples=1,input=self.probs[cls,i,:])
+                one_hot = nn.functional.one_hot(sample, self.alphabet_size).float()
+                seq.append(self.m.smooth_labels(one_hot, 0.81 if isinstance(self.m, NSphere) else 0.9))
+                # seq.append(torch.multinomial(replacement=True,num_samples=1,input=self.probs[cls,i,:]))
+            # yield torch.tensor(seq), cls
+            yield torch.hstack(seq).squeeze(), cls
 
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -72,7 +78,6 @@ def _generate_dataset(probas: Tensor, manifold: Manifold, n_train: int, n_test: 
     x_train = _generate_raw_tensor(probas, manifold, n_train)
     x_test = _generate_raw_tensor(probas, manifold, n_test)
     return TensorDataset(x_train), TensorDataset(x_test)
-
 
 def train(
     epochs: int,
@@ -150,7 +155,10 @@ def train(
         test_loss = []
         model.eval()
         with torch.inference_mode():
+            i = 0
             for x in test_loader:
+                if i > 1000:
+                    break
                 x = x[0]
                 x = x.to(device)
                 optimizer.zero_grad()
@@ -160,6 +168,7 @@ def train(
                     # dfm method otherwise
                     loss = dfm_train_step(x, model)
                 test_loss += [loss.item()]
+                i = i + 1
         logs["test_loss"] = np.mean(test_loss)
         logs["lr"] = lr_scheduler.get_last_lr()[0]
         print(f"--- Epoch {epoch+1:03d}/{epochs:03d}: train loss = {np.mean(train_loss):.5f};"\
@@ -198,7 +207,10 @@ def run_dfm_toy_experiment(args: dict[str, Any]):
         # generate data
         # send to device for KL later
         real_probas = torch.softmax(torch.rand((seq_len, d)), dim=-1)
-        train_dataset, test_dataset = _generate_dataset(real_probas, manifold, n_train, 1000)
+        train_dataset, test_dataset = _generate_dataset(real_probas, manifold, n_train, 10_000)
+        # train_dataset = ToyDataset(manifold, num_cls=1, toy_seq_len=seq_len,
+                # toy_simplex_dim=d, sz=100000)
+        # test_dataset = train_dataset
         # wasserstein_set = _generate_raw_tensor(real_probas, manifold, 2500).to(device)
         train_loader = DataLoader(train_dataset, batch_size=512, shuffle=True, generator=torch.Generator(device='cuda'),)
         test_loader = DataLoader(test_dataset, batch_size=512, shuffle=False)

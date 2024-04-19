@@ -26,6 +26,7 @@ from .model import (
     BestMLP,
     ProductMLP,
     TembMLP,
+    CNNModel,
     str_to_activation,
 )
 from .plot import (

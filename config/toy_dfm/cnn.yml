@@ -1,0 +1,12 @@
+name: CNNModel
+hidden: 128
+mode: simplex
+num_cls: 3
+depth: 1
+dropout: 0.0
+prior_pseudocount: 2.0
+cls_expanded_simplex: False
+clean_data: False
+classifier: False
+classifier_free_guidance: False
+activation: relu
