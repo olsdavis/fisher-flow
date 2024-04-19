@@ -203,7 +203,7 @@ class TestManifoldsGeneral(unittest.TestCase):
                     (transported * q).sum(dim=-1),
                     torch.zeros(points, seq_len),
                     atol=1e-12,
-                    rtol=1e-5,
+                    rtol=1e-12,
                 )
 
 
