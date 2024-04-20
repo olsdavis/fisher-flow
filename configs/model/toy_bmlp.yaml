@@ -1,0 +1,28 @@
+_target_: src.models.SFMModule
+
+optimizer:
+  _target_: torch.optim.AdamW
+  _partial_: true
+  lr: 0.001
+  weight_decay: 0.0
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+  _partial_: true
+  mode: min
+  factor: 0.1
+  patience: 10
+
+net:
+  _target_: src.models.net.BestMLP
+  hidden: 128
+  depth: 4
+  activation: lrelu
+  emb_size: 64
+  batch_norm: false
+  # should be overriden in experiment
+  k: 4
+  dim: 100
+
+
+compile: false

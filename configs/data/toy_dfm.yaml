@@ -5,4 +5,4 @@ train_val_test_split: [100_000, 5_000, 10_000]
 num_workers: 4
 pin_memory: False
 k: 4
-dim: 100
+dim: 160

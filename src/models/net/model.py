@@ -4,11 +4,12 @@ from torch import Tensor, nn
 import copy
 import torch.nn.functional as F
 import numpy as np
-import ipdb
+
 
 def expand_simplex(xt, alphas, prior_pseudocount):
     prior_weights = (prior_pseudocount / (alphas + prior_pseudocount - 1))[:, None, None]
     return torch.cat([xt * (1 - prior_weights), xt * prior_weights], -1), prior_weights
+
 
 def str_to_activation(name: str) -> nn.Module:
     """
@@ -469,6 +470,7 @@ class BestMLP(nn.Module):
         x = x.reshape(final_shape)
         return x
 
+
 class GaussianFourierProjection(nn.Module):
     """
     Gaussian random features for encoding time steps.
@@ -484,6 +486,7 @@ class GaussianFourierProjection(nn.Module):
         x_proj = x[:, None] * self.W[None, :] * 2 * np.pi
         return torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1)
 
+
 class Dense(nn.Module):
     """
     A fully connected layer that reshapes outputs to feature maps.
@@ -495,6 +498,7 @@ class Dense(nn.Module):
 
     def forward(self, x):
         return self.dense(x)[...]
+
 
 class CNNModel(nn.Module):
     def __init__(self,

@@ -5,21 +5,21 @@
 
 defaults:
   - override /data: toy_dfm
-  - override /model: toy_cnn_model
+  - override /model: toy_bmlp
   - override /callbacks: default
   - override /trainer: default
 
 # all parameters below will be merged with parameters from default configurations set above
 # this allows you to overwrite only specified parameters
 
-tags: ["mnist", "simple_dense_net"]
+tags: ["toy_dfm", "bmlp"]
 
 seed: 12345
 
 trainer:
-  min_epochs: 10
-  max_epochs: 10
-  gradient_clip_val: 0.5
+  min_epochs: 1
+  max_epochs: 1
+  gradient_clip_val: 1.0
 
 model:
   optimizer:
@@ -28,6 +28,8 @@ model:
     k: ${data.k}
     dim: ${data.dim}
   compile: false
+  manifold: "sphere"
+  kl_eval: true
 
 data:
   batch_size: 512

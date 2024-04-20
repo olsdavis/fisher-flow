@@ -2,11 +2,11 @@ from typing import Any
 
 import torch
 from torch import Tensor, nn
-from lightning import LightningDataModule
 from torch.utils.data import DataLoader, Dataset
+from lightning import LightningDataModule
 
 
-from src.sfm import NSphere, manifold_from_name
+from src.sfm import manifold_from_name
 
 
 class ToyDataset(torch.utils.data.IterableDataset):
@@ -28,8 +28,8 @@ class ToyDataset(torch.utils.data.IterableDataset):
         while True:
             sample = torch.multinomial(replacement=True, num_samples=1, input=self.probs)
             one_hot = nn.functional.one_hot(sample, self.alphabet_size).float()
-            sample = self.m.smooth_labels(one_hot, 0.99 if isinstance(self.m, NSphere) else 0.9)
-            yield sample.squeeze()
+            # if there is a need to smooth labels, it is done in the model's training step
+            yield one_hot.squeeze()
 
 
 class ToyDFMDataModule(LightningDataModule):

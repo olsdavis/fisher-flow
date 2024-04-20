@@ -4,10 +4,10 @@ from lightning import LightningModule
 from torchmetrics import MeanMetric
 
 
-from src.sfm import OTSampler, manifold_from_name, ot_train_step
+from src.sfm import Manifold, OTSampler, estimate_categorical_kl, manifold_from_name, ot_train_step
 
 
-class ToyDFMModule(LightningModule):
+class SFMModule(LightningModule):
     """
     Module for the Toy DFM dataset.
     """
@@ -18,6 +18,9 @@ class ToyDFMModule(LightningModule):
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler,
         compile: bool,
+        manifold: str = "sphere",
+        kl_eval: bool = False,
+        kl_samples: int = 512_000,
     ) -> None:
         """
         :param net: The model to train.
@@ -30,14 +33,20 @@ class ToyDFMModule(LightningModule):
         # also ensures init params will be stored in ckpt
         self.save_hyperparameters(logger=False)
 
-        self.net = net
-        self.manifold = manifold_from_name(self.hparams.get("manifold", "sphere"))
-        self.sampler = OTSampler(self.manifold, "exact")
+        if compile:
+            self.net = torch.compile(net)
+        else:
+            self.net = net
+        # default manifold = sphere
+        self.manifold: Manifold = manifold_from_name(manifold)
+        self.sampler: OTSampler = OTSampler(self.manifold, "exact")
 
         # for averaging loss across batches
         self.train_loss = MeanMetric()
         self.val_loss = MeanMetric()
         self.test_loss = MeanMetric()
+        self.kl_eval = kl_eval
+        self.kl_samples = kl_samples
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Perform a forward pass through the model `self.net`."""
@@ -55,7 +64,12 @@ class ToyDFMModule(LightningModule):
         """
         Perform a single model step on a batch of data.
         """
-        return ot_train_step(x_1, self.manifold, self.net, self.sampler)[0]
+        return ot_train_step(
+            self.manifold.smooth_labels(x_1, mx=0.999),
+            self.manifold,
+            self.net,
+            self.sampler,
+        )[0]
 
     def training_step(
         self, x_1: torch.Tensor, batch_idx: int,
@@ -109,7 +123,13 @@ class ToyDFMModule(LightningModule):
         self.log("test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True)
 
     def on_test_epoch_end(self):
-        """Nothing to do."""
+        """Evaluates KL if required."""
+        if not self.kl_eval:
+            return
+        # evaluate KL
+        real_probs = self.trainer.test_dataloaders.dataset.probs.to(self.device)
+        kl = estimate_categorical_kl(self.net, self.manifold, real_probs, self.kl_samples)
+        self.log("test/kl", kl, on_step=False, on_epoch=True, prog_bar=False)
 
     def setup(self, stage: str):
         """Lightning hook that is called at the beginning of fit (train + validate), validate,
@@ -147,4 +167,4 @@ class ToyDFMModule(LightningModule):
         return {"optimizer": optimizer}
 
 if __name__ == "__main__":
-    ToyDFMModule(None, None, None, False)
+    SFMModule(None, None, None, False)
