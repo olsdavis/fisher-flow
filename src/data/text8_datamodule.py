@@ -1,56 +1,55 @@
 from typing import Any
-
+import os
+import numpy as np
 import torch
 from torch import Tensor, nn
 from torch.utils.data import DataLoader, Dataset
 from lightning import LightningDataModule
-
-
+import sys
 from src.sfm import manifold_from_name
+import ipdb
 
-
-class ToyDataset(torch.utils.data.IterableDataset):
+class Text8Dataset(torch.utils.data.Dataset):
     """
-    Adapted from `https://github.com/HannesStark/dirichlet-flow-matching/blob/main/utils/dataset.py`.
+    Adapted from `https://github.com/andrew-cr/discrete_flow_models/blob/main/train.py`
     """
-    def __init__(self, manifold, probs: Tensor, toy_seq_len: int, toy_simplex_dim: int, sz: int = 100_000):
+    def __init__(self, manifold, dataset, vocab_size: int, block_size: int, split: str = 'train'):
         super().__init__()
         self.m = manifold
-        self.sz = sz
-        self.seq_len = toy_seq_len
-        self.alphabet_size = toy_simplex_dim
-        self.probs = probs
+        self.dataset = dataset
+        self.vocab_size = vocab_size
+        self.block_size = block_size
+        self.split = split
 
     def __len__(self) -> int:
-        return self.sz
+        return len(self.dataset)
 
-    def __iter__(self):
-        while True:
-            sample = torch.multinomial(replacement=True, num_samples=1, input=self.probs)
-            one_hot = nn.functional.one_hot(sample, self.alphabet_size).float()
-            # if there is a need to smooth labels, it is done in the model's training step
-            yield one_hot.squeeze()
+    def __getitem__(self, idx):
+        sample = torch.from_numpy(self.dataset[idx + self.block_size].astype(np.int64))
+        one_hot = nn.functional.one_hot(sample, self.vocab_size).float()
+        # if there is a need to smooth labels, it is done in the model's training step
+        yield one_hot.squeeze()
 
 
-class ToyDFMDataModule(LightningDataModule):
+class Text8DataModule(LightningDataModule):
     """
-    Toy DFM data module.
+    Text8 data module.
     """
 
     def __init__(
         self,
         k: int = 4,
         dim: int = 100,
-        data_dir: str = "data/",
+        data_dir: str = "data/text8",
         train_val_test_split: tuple[int, int, int] = (55_000, 5_000, 10_000),
         batch_size: int = 64,
         num_workers: int = 0,
         pin_memory: bool = False,
     ):
-        """Initialize a `MNISTDataModule`.
+        """Initialize a `Text8DataModule`.
 
-        :param data_dir: The data directory. Defaults to `"data/"`.
-        :param train_val_test_split: The train, validation and test split. Defaults to `(55_000, 5_000, 10_000)`.
+        :param data_dir: The data directory. Defaults to `"data/text8"`.
+        :param train_val_test_split: Not used. The train, validation and test split. Defaults to `(55_000, 5_000, 10_000)`.
         :param batch_size: The batch size. Defaults to `64`.
         :param num_workers: The number of workers. Defaults to `0`.
         :param pin_memory: Whether to pin memory. Defaults to `False`.
@@ -67,10 +66,30 @@ class ToyDFMDataModule(LightningDataModule):
         self.data_train: Dataset | None = None
         self.data_val: Dataset | None = None
         self.data_test: Dataset | None = None
+
         self.batch_size_per_device = batch_size
 
     def prepare_data(self):
         """Nothing to download."""
+        meta_path = os.path.join(data_dir, 'meta.pkl')
+        meta_vocab_size = None
+        assert os.path.exists(meta_path)
+        with open(meta_path, 'rb') as f:
+            self.meta = pickle.load(f)
+        self.meta_vocab_size = meta['vocab_size']
+        print(f"found vocab_size = {meta_vocab_size} (inside {meta_path})")
+
+        self.stoi = meta['stoi']
+        self.itos = meta['itos']
+
+        # increase vocab size by 1 to include a mask token
+        self.meta_vocab_size += 1
+        self.mask_token_id = meta_vocab_size - 1
+        self.stoi['X'] = mask_token_id
+        self.itos[mask_token_id] = 'X'
+        self.data_train_base = np.memmap(os.path.join(data_dir, 'train.bin'), dtype=np.uint16, mode='r')
+        self.data_val_base = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
+        ipdb.set_trace()
 
     def setup(self, stage: str | None = None) -> None:
         """
@@ -87,15 +106,24 @@ class ToyDFMDataModule(LightningDataModule):
         # load and split datasets only if not loaded already
         if not self.data_train and not self.data_val and not self.data_test:
             manifold = manifold_from_name(self.hparams.get("manifold", "sphere"))
-            self.data_train, self.data_val, self.data_test = (
-                ToyDataset(
-                    manifold,
-                    self.probs,
-                    self.k,
-                    self.dim,
-                    sz,
-                ) for sz in self.hparams.train_val_test_split
-            )
+            self.data_train = Text8Dataset(
+                                    manifold,
+                                    self.data_train_base,
+                                    self.meta_vocab_size,
+                                    self.block_size,
+                                    split = 'train'
+                                    )
+            self.data_val = Text8Dataset(
+                                    manifold,
+                                    self.data_val_base,
+                                    self.meta_vocab_size,
+                                    self.block_size,
+                                    split = 'val'
+                                    )
+
+            # There is no test set so we set it to val
+            self.data_test = self.data_val
+
 
     def train_dataloader(self) -> DataLoader[Any]:
         """Create and return the train dataloader.
@@ -162,4 +190,5 @@ class ToyDFMDataModule(LightningDataModule):
 
 
 if __name__ == "__main__":
-    _ = ToyDFMDataModule()
+    ipdb.set_trace()
+    _ = Text8DataModule()
