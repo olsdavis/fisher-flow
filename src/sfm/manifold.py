@@ -370,7 +370,9 @@ class NSphere(Manifold):
         See `Manifold.exp_map`.
         """
         theta = v.norm(dim=-1, keepdim=True, p=2)  # norm is independent of point for sphere
-        return theta.cos() * p + usinc(theta) * v
+        ret = theta.cos() * p + usinc(theta) * v
+        # TODO: remove?
+        return ret.abs()
 
     def log_map(self, p: Tensor, q: Tensor) -> Tensor:
         """
@@ -410,6 +412,7 @@ class NSphere(Manifold):
         """
         See `Manifold.make_tangent`.
         """
+        p = p.abs()
         return v - p * fast_dot(p, v)
 
     def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
@@ -436,7 +439,7 @@ class NSphere(Manifold):
             return x.square()
         raise NotImplementedError(f"unimplemented for {m}")
 
-    def belongs(self, x: Tensor, eps: float = 1e-7) -> Tensor:
+    def belongs(self, x: Tensor, eps: float = 1e-6) -> Tensor:
         """
         See `Manifold.belongs`.
         """

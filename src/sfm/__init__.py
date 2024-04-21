@@ -1,5 +1,4 @@
 """Utils for the entire project."""
-import os
 from .maths import (
     fast_dot,
     safe_arccos,
