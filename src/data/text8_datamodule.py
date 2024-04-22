@@ -1,13 +1,13 @@
 from typing import Any
+import pickle
 import os
 import numpy as np
 import torch
-from torch import Tensor, nn
+from torch import nn
 from torch.utils.data import DataLoader, Dataset
 from lightning import LightningDataModule
-import sys
 from src.sfm import manifold_from_name
-import ipdb
+
 
 class Text8Dataset(torch.utils.data.Dataset):
     """
@@ -39,7 +39,6 @@ class Text8DataModule(LightningDataModule):
     def __init__(
         self,
         k: int = 4,
-        dim: int = 100,
         data_dir: str = "data/text8",
         train_val_test_split: tuple[int, int, int] = (55_000, 5_000, 10_000),
         batch_size: int = 64,
@@ -59,9 +58,8 @@ class Text8DataModule(LightningDataModule):
         # this line allows to access init params with 'self.hparams' attribute
         # also ensures init params will be stored in ckpt
         self.save_hyperparameters(logger=False)
+        # corresponds to window size
         self.k = k
-        self.dim = dim
-        self.probs = torch.softmax(torch.rand(k, dim), dim=-1)
 
         self.data_train: Dataset | None = None
         self.data_val: Dataset | None = None
@@ -71,25 +69,24 @@ class Text8DataModule(LightningDataModule):
 
     def prepare_data(self):
         """Nothing to download."""
-        meta_path = os.path.join(data_dir, 'meta.pkl')
-        meta_vocab_size = None
+        data_dir = "./data"
+        meta_path = os.path.join(data_dir, 'meta_text8.pkl')
         assert os.path.exists(meta_path)
         with open(meta_path, 'rb') as f:
             self.meta = pickle.load(f)
-        self.meta_vocab_size = meta['vocab_size']
-        print(f"found vocab_size = {meta_vocab_size} (inside {meta_path})")
+        self.meta_vocab_size = self.meta['vocab_size']
+        print(f"found vocab_size = {self.meta_vocab_size} (inside {meta_path})")
 
-        self.stoi = meta['stoi']
-        self.itos = meta['itos']
+        self.stoi = self.meta['stoi']
+        self.itos = self.meta['itos']
 
         # increase vocab size by 1 to include a mask token
         self.meta_vocab_size += 1
-        self.mask_token_id = meta_vocab_size - 1
-        self.stoi['X'] = mask_token_id
-        self.itos[mask_token_id] = 'X'
+        self.mask_token_id = self.meta_vocab_size - 1
+        self.stoi['X'] = self.mask_token_id
+        self.itos[self.mask_token_id] = 'X'
         self.data_train_base = np.memmap(os.path.join(data_dir, 'train.bin'), dtype=np.uint16, mode='r')
         self.data_val_base = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
-        ipdb.set_trace()
 
     def setup(self, stage: str | None = None) -> None:
         """
@@ -107,23 +104,22 @@ class Text8DataModule(LightningDataModule):
         if not self.data_train and not self.data_val and not self.data_test:
             manifold = manifold_from_name(self.hparams.get("manifold", "sphere"))
             self.data_train = Text8Dataset(
-                                    manifold,
-                                    self.data_train_base,
-                                    self.meta_vocab_size,
-                                    self.block_size,
-                                    split = 'train'
-                                    )
+                manifold,
+                self.data_train_base,
+                self.meta_vocab_size,
+                self.k,
+                split = 'train'
+            )
             self.data_val = Text8Dataset(
-                                    manifold,
-                                    self.data_val_base,
-                                    self.meta_vocab_size,
-                                    self.block_size,
-                                    split = 'val'
-                                    )
+                manifold,
+                self.data_val_base,
+                self.meta_vocab_size,
+                self.k,
+                split = 'val'
+            )
 
             # There is no test set so we set it to val
             self.data_test = self.data_val
-
 
     def train_dataloader(self) -> DataLoader[Any]:
         """Create and return the train dataloader.
@@ -190,5 +186,4 @@ class Text8DataModule(LightningDataModule):
 
 
 if __name__ == "__main__":
-    ipdb.set_trace()
-    _ = Text8DataModule()
+    _ = Text8DataModule().prepare_data()
