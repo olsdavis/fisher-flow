@@ -5,14 +5,14 @@
 
 defaults:
   - override /data: text8
-  - override /model: toy_bmlp
+  - override /model: toy_cnn_sfm
   - override /callbacks: default
   - override /trainer: default
 
 # all parameters below will be merged with parameters from default configurations set above
 # this allows you to overwrite only specified parameters
 
-tags: ["text8", "bmlp"]
+tags: ["text8", "cnn"]
 
 seed: 12345
 
@@ -27,8 +27,8 @@ model:
   net:
     k: ${data.k}
     dim: ${data.dim}
+    manifold: sphere
   compile: false
-  manifold: "sphere"
 
 data:
   batch_size: 512
@@ -38,6 +38,6 @@ data:
 logger:
   wandb:
     tags: ${tags}
-    group: "text8"
+    group: "toy_dfm"
   aim:
-    experiment: "text8"
+    experiment: "toy_dfm"
