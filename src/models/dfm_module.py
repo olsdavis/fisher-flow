@@ -24,7 +24,7 @@ class DNAModule(pl.LightningModule):
         scheduler: torch.optim.lr_scheduler,
         compile: bool,
         mode: str,
-        kl_samples: int = 5120,
+        kl_samples: int = 512_000,
         vectorfield_addition: bool = False,
         guidance_scale: float = 0.5,
         cls_expanded_simplex: bool = False,

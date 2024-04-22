@@ -9,7 +9,6 @@ def usinc(theta: Tensor) -> Tensor:
     return torch.sinc(theta / torch.pi)
 
 
-@torch.jit.script
 def safe_arccos(x: Tensor) -> Tensor:
     """A safe version of `x.arccos()`."""
     return x.clamp(-1.0, 1.0).acos()
