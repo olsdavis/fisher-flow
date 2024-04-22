@@ -15,7 +15,7 @@ scheduler:
 
 net:
   _target_: src.models.net.BestMLP
-  hidden: 128
+  hidden: 512
   depth: 4
   activation: lrelu
   emb_size: 64
