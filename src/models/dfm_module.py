@@ -24,7 +24,7 @@ class DNAModule(pl.LightningModule):
         scheduler: torch.optim.lr_scheduler,
         compile: bool,
         mode: str,
-        kl_samples: int = 5120,
+        kl_samples: int = 512_000,
         vectorfield_addition: bool = False,
         guidance_scale: float = 0.5,
         cls_expanded_simplex: bool = False,
@@ -127,12 +127,11 @@ class DNAModule(pl.LightningModule):
             while to_draw > 0:
                 n = min(to_draw, 512)
                 x_0 = Dirichlet(concentration).sample((n,))
-                samples = self.dirichlet_flow_inference(x_0, None, self.net)[0]
+                samples = self.dirichlet_flow_inference(x_0, None, self.net)[1]
                 acc += torch.nn.functional.one_hot(samples.argmax(dim=-1), self.net.dim).sum(dim=0)
                 to_draw -= n
         acc /= self.kl_samples
         real_probs = self.trainer.test_dataloaders.dataset.probs.to(self.device)
-        print(real_probs, acc)
         kl = (acc * (acc.log() - real_probs.log())).sum().item()
         self.log("test/kl", kl, on_step=False, on_epoch=True, prog_bar=False)
 
@@ -161,8 +160,11 @@ class DNAModule(pl.LightningModule):
         else:
             cls_inp = None
         logits = self.net(xt_inp, t=alphas, cls=cls_inp)
-
-        losses = torch.nn.functional.cross_entropy(logits.transpose(1, 2), seq_distill if self.mode == 'distill' else seq.argmax(dim=-1), reduction='mean')
+        losses = torch.nn.functional.cross_entropy(
+            logits.transpose(1, 2),
+            seq_distill if self.mode == 'distill' else seq.argmax(dim=-1),
+            reduction='mean',
+        )
 
         # self.lg('perplexity', torch.exp(losses.mean())[None].expand(B))
         if self.stage == "val":
@@ -207,9 +209,8 @@ class DNAModule(pl.LightningModule):
 
     @torch.no_grad()
     def dirichlet_flow_inference(self, seq, cls, model):
-        B, L, _ = seq.shape
-        K = model.dim
-        x0 = torch.distributions.Dirichlet(torch.ones(B, L, model.dim, device=seq.device)).sample()
+        B, L, K = seq.shape
+        x0 = torch.distributions.Dirichlet(torch.ones(B, L, K, device=seq.device)).sample()
         eye = torch.eye(K).to(x0)
         xt = x0.clone()
 
@@ -267,7 +268,7 @@ class DNAModule(pl.LightningModule):
             if not torch.allclose(xt.sum(2), torch.ones((B, L), device=self.device), atol=1e-4) or not (xt >= 0).all():
                 print(f'WARNING: xt.min(): {xt.min()}. Some values of xt do not lie on the simplex. There are we are {(xt<0).sum()} negative values in xt of shape {xt.shape} that are negative. We are projecting them onto the simplex.')
                 xt = simplex_proj(xt)
-        return logits, x0
+        return logits, xt  # NOTE: this used to be x0; but it seems that it was a mistake
 
     @torch.no_grad()
     def riemannian_flow_inference(self, seq):
