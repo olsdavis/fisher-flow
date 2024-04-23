@@ -10,10 +10,16 @@
 python xxx.py --arg1 --arg2
 ```
 
-## Products and Reactants Experiment
+## RetroBridge: Products and Reactants Experiment
 
-[TODO]
+Test whether the data has been loaded correctly:
 
 ```py
-python xxx.py --arg1 --arg2
+python -m src.data.retrobridge_datamodule
+```
+
+To run Simplex-Flows on this datasets:
+
+```py
+python -m xxx.xxx.xxx
 ```

@@ -6,3 +6,5 @@ slurm/
 ./data/
 .pytest_cache/
 logs/
+*.csv
+*.pt
