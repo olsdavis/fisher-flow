@@ -18,7 +18,7 @@ Test whether the data has been loaded correctly:
 python -m src.data.retrobridge_datamodule
 ```
 
-To run Simplex-Flows on this datasets:
+To run Simplex-Flows on this dataset:
 
 ```py
 python -m xxx.xxx.xxx
