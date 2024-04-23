@@ -35,6 +35,7 @@ model:
 data:
   batch_size: 512
   k: 4
+  dim: 100
 
 logger:
   wandb:

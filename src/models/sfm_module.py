@@ -167,5 +167,6 @@ class SFMModule(LightningModule):
             }
         return {"optimizer": optimizer}
 
+
 if __name__ == "__main__":
     SFMModule(None, None, None, False)

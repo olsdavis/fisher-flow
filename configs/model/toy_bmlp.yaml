@@ -15,14 +15,11 @@ scheduler:
 
 net:
   _target_: src.models.net.BestMLP
-  hidden: 128
+  hidden: 512
   depth: 4
   activation: lrelu
   emb_size: 64
   batch_norm: false
-  # should be overriden in experiment
-  k: 4
-  dim: 100
 
 
 compile: false
