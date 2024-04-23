@@ -40,6 +40,5 @@ logger:
   wandb:
     tags: ${tags}
     group: "toy_dfm"
-    name: cnn${data.k}_${data.dim}
   aim:
     experiment: "toy_dfm"
