@@ -1,7 +1,8 @@
 """Testing manifolds."""
 import unittest
 import torch
-from torch import testing
+from torch import nn, testing
+from src.models.net import BestMLP
 from src.sfm import NSimplex, NSphere, set_seeds
 
 
@@ -96,9 +97,44 @@ class TestNSphere(unittest.TestCase):
         m = NSphere()
         p = m.uniform_prior(500, 16, 10)
         v = m.make_tangent(p, torch.randn(500, 16, 10))
+        assert m.all_belong_tangent(p, v), "not tangent initially"
         testing.assert_close(
             m.parallel_transport(p, p, v),
             v,
+        )
+
+    @torch.no_grad()
+    def test_geodesic_interpolant(self):
+        """
+        Tests the precision of geodesic interpolants.
+        """
+        m = NSphere()
+        x_0 = torch.Tensor([[[0.0, 1.0]]])
+        x_1 = torch.Tensor([[[1.0, 0.0]]]).sqrt()
+        t = torch.Tensor([[0.5]])
+        x_t = m.geodesic_interpolant(x_0, x_1, t)
+        testing.assert_close(x_t, torch.Tensor([[[0.5, 0.5]]]).sqrt())
+
+    @torch.no_grad()
+    def test_tangent_euler_remains_on_sphere(self):
+        """
+        Tests whether the Tangent Euler method remains on the sphere
+        """
+        set_seeds(101)
+        m = NSphere()
+        k = 10
+        d = 100
+        x_0 = m.uniform_prior(1024, k, d)
+        model = BestMLP(d, k, 128, 2, 2, "lrelu")
+        self.assertTrue(
+            m.all_belong(
+                m.tangent_euler(
+                    x_0,
+                    model,
+                    steps=100,
+                )
+            ),
+            "must remain on sphere",
         )
 
     @torch.no_grad()
@@ -121,8 +157,8 @@ class TestManifoldsGeneral(unittest.TestCase):
 
     def __init__(self, *args):
         super().__init__(*args)
-        self.seq_len = 4
-        self.dim = 160
+        self.seq_len = 30
+        self.dim = 320
         self.manifolds = [
             # NSimplex(),
             NSphere(),
@@ -150,7 +186,7 @@ class TestManifoldsGeneral(unittest.TestCase):
         for manifold in self.manifolds:
             for d in range(5, 100, 5):
                 set_seeds(d)
-                x = torch.nn.functional.one_hot(torch.randint(0, d, (10, self.seq_len)), d)
+                x = torch.nn.functional.one_hot(torch.randint(0, d, (10, self.seq_len)), d).float()
                 self.assertTrue(
                     manifold.all_belong(x), "all one-hot encoded points must be on simplex"
                 )
@@ -177,7 +213,6 @@ class TestManifoldsGeneral(unittest.TestCase):
             y = manifold.uniform_prior(500, self.seq_len, self.dim)
             back = manifold.exp_map(x, manifold.log_map(x, y))
             # TODO is 1e-7 good enough?
-            print(back.dtype, y.dtype)
             testing.assert_close(
                 back, y, rtol=1e-5, atol=1e-7,
             )
@@ -194,8 +229,10 @@ class TestManifoldsGeneral(unittest.TestCase):
             set_seeds(2)
             p = manifold.uniform_prior(points, seq_len, dim)
             q = manifold.uniform_prior(points, seq_len, dim)
+            assert manifold.all_belong(p) and manifold.all_belong(q), "must be on manifold"
             v = torch.rand((points, seq_len, dim))
             v = manifold.make_tangent(p, v)
+            assert manifold.all_belong_tangent(p, v), "must be tangent initially"
             transported = manifold.parallel_transport(p, q, v)
             if type(manifold).__name__ == "NSimplex":
                 testing.assert_close(

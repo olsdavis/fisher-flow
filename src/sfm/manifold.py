@@ -220,30 +220,17 @@ class Manifold(ABC):
         """
 
     @abstractmethod
-    def belongs(self, x: Tensor, eps: float = 1e-7) -> Tensor:
-        """
-        Returns a Tensor that indicates whether each point belongs to the manifold.
-        """
-
-    def all_belong(self, x: Tensor, eps: float = 1e-7) -> Tensor:
+    def all_belong(self, x: Tensor) -> bool:
         """
         Returns `True` iff all points belong to the manifold.
         """
-        return self.belongs(x, eps).all()
 
     @abstractmethod
-    def belongs_tangent(self, x: Tensor, v: Tensor, eps: float = 1e-7) -> Tensor:
-        """
-        Returns a Tensor that indicates whether each tangent vector
-        belongs to the tangent space of the manifold at point `x`.
-        """
-
-    def all_belong_tangent(self, x: Tensor, v: Tensor, eps: float = 1e-7) -> Tensor:
+    def all_belong_tangent(self, x: Tensor, v: Tensor) -> bool:
         """
         Returns `True` iff all tangent vectors belong to the tangent space of the manifold
         at point `x`.
         """
-        return self.belongs_tangent(x, v, eps).all()
 
 
 class NSimplex(Manifold):
@@ -345,17 +332,17 @@ class NSimplex(Manifold):
             return x
         raise NotImplementedError(f"unimplemented for {m}")
 
-    def belongs(self, x: Tensor, eps: float = 1e-7) -> Tensor:
+    def all_belong(self, x: Tensor) -> bool:
         """
-        See `Manifold.belongs`.
+        See `Manifold.all_belong`.
         """
-        return (x.sum(dim=-1) - 1.0).abs() < eps
+        return torch.allclose(x.sum(dim=-1), torch.tensor(1.0))
 
-    def belongs_tangent(self, x: Tensor, v: Tensor, eps: float = 1e-7) -> Tensor:
+    def all_belong_tangent(self, x: Tensor, v: Tensor) -> bool:
         """
-        See `Manifold.belongs_tangent`.
+        See `Manifold.all_belong_tangent`.
         """
-        return v.sum(dim=-1).abs() < eps
+        return torch.allclose(v.sum(dim=-1), torch.tensor(0.0))
 
 
 class NSphere(Manifold):
@@ -401,19 +388,58 @@ class NSphere(Manifold):
 
     def parallel_transport(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
         """
-        See `Manifold.parallel_transport`.
+        See `Manifold.parallel_transport`. Note: assumes this is on 1-sphere
         """
         m = p + q
-        mnorm2 = m.square().sum(dim=-1, keepdim=True)
-        factor = 2.0 * fast_dot(v, q) / mnorm2
+        # mnorm2 = m.square().sum(dim=-1, keepdim=True)
+        # mnorm2 = 2.0 + 2.0 * fast_dot(p, q)
+        mnorm2 = 1.0 + fast_dot(p, q)
+        # factor = 2.0 * fast_dot(v, q) / mnorm2
+        factor = fast_dot(v / mnorm2, q)
         return v - m * factor
+
+    def parallel_transport_alt(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
+        """
+        See `Manifold.parallel_transport`. Based on geomstats.
+        """
+        direction = self.log_map(p, q)
+        theta = direction.norm(dim=-1, keepdim=True)
+        eps = torch.where(theta == 0.0, 1.0, theta)
+        normalized_b = direction / eps
+        pb = fast_dot(v, normalized_b)
+        p_orth = v - pb * normalized_b
+        return (
+            - theta.sin() * pb * p
+            + theta.cos() * pb * normalized_b
+            + p_orth
+        )
+
+    def make_tangent_alt(self, p: Tensor, v: Tensor) -> Tensor:
+        """
+        Alternative. See `Manifold.make_tangent`.
+        """
+        # alternative version:
+        # p_unit = p / p.norm(dim=-1, keepdim=True)
+        p_unit = torch.nn.functional.normalize(p, p=2, dim=-1)
+        normalized = v / (p_unit * v).sum(dim=-1, keepdim=True)
+        ret = normalized - p
+        return ret
 
     def make_tangent(self, p: Tensor, v: Tensor) -> Tensor:
         """
         See `Manifold.make_tangent`.
         """
+        # TODO: remove?
         p = p.abs()
-        return v - p * fast_dot(p, v)
+        # return v - p * fast_dot(p, v)
+        # keep the normalisation even if = 1: more precise!
+        sq = p.square().sum(dim=-1, keepdim=True)
+        inner = fast_dot(p / sq, v, keepdim=True)
+        # coef = inner / sq
+        ret = v - inner * p
+        # dirty trick that makes it a tiny bit more precise
+        # ret[:, :, 0] = ret[:, :, 0] - (p * ret).sum(dim=-1)
+        return ret
 
     def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
         """
@@ -439,17 +465,25 @@ class NSphere(Manifold):
             return x.square()
         raise NotImplementedError(f"unimplemented for {m}")
 
-    def belongs(self, x: Tensor, eps: float = 1e-6) -> Tensor:
+    def batch_square_norm(self, x: Tensor) -> Tensor:
         """
-        See `Manifold.belongs`.
+        Returns the square of the euclidean norm of `x` in the last coordinate.
         """
-        return (x.square().sum(dim=-1) - 1.0).abs() < eps
+        return x.square().sum(dim=-1)
 
-    def belongs_tangent(self, x: Tensor, v: Tensor, eps: float = 1e-7) -> Tensor:
+    def all_belong(self, x: Tensor) -> bool:
         """
-        See `Manifold.belongs_tangent`.
+        See `Manifold.all_belong`.
         """
-        return fast_dot(x, v).abs() < eps
+        return (
+            torch.allclose(self.batch_square_norm(x), torch.tensor(1.0))
+        )
+
+    def all_belong_tangent(self, x: Tensor, v: Tensor) -> bool:
+        """
+        See `Manifold.all_belong_tangent`.
+        """
+        return torch.allclose(fast_dot(x, v), torch.tensor(0.0), atol=1e-5)
 
 
 def manifold_from_name(name: str) -> Manifold:

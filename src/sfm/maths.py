@@ -9,7 +9,6 @@ def usinc(theta: Tensor) -> Tensor:
     return torch.sinc(theta / torch.pi)
 
 
-@torch.jit.script
 def safe_arccos(x: Tensor) -> Tensor:
     """A safe version of `x.arccos()`."""
     return x.clamp(-1.0, 1.0).acos()
@@ -18,9 +17,10 @@ def safe_arccos(x: Tensor) -> Tensor:
 __f_dot = torch.vmap(torch.vmap(torch.dot))
 
 
-def fast_dot(p: Tensor, q: Tensor, keepdim: bool = True) -> Tensor:
+def fast_dot(u: Tensor, v: Tensor, keepdim: bool = True) -> Tensor:
     """A faster and unified version of dot products."""
-    ret = __f_dot(p, q)
-    if keepdim:
-        ret = ret.unsqueeze(-1)
-    return ret
+    # ret = __f_dot(p, q)
+    # if keepdim:
+    #     ret = ret.unsqueeze(-1)
+    # return ret
+    return (u * v).sum(dim=-1, keepdim=keepdim)

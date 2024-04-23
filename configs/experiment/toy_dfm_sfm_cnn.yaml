@@ -5,7 +5,7 @@
 
 defaults:
   - override /data: toy_dfm
-  - override /model: toy_cnn_model
+  - override /model: toy_cnn_sfm
   - override /callbacks: default
   - override /trainer: default
 
@@ -20,17 +20,16 @@ trainer:
   min_epochs: 1
   max_epochs: 1000
   gradient_clip_val: 1.0
-  num_sanity_val_steps: 0
 
 model:
   optimizer:
-    lr: 0.0001
+    lr: 0.001
   net:
     k: ${data.k}
     dim: ${data.dim}
-    mode: "dirichlet"
   compile: false
-  mode: "dirichlet"
+  manifold: sphere
+  kl_eval: true
 
 data:
   batch_size: 512
