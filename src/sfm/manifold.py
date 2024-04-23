@@ -388,32 +388,54 @@ class NSphere(Manifold):
 
     def parallel_transport(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
         """
-        See `Manifold.parallel_transport`.
+        See `Manifold.parallel_transport`. Note: assumes this is on 1-sphere
         """
         m = p + q
-        mnorm2 = m.square().sum(dim=-1, keepdim=True)
-        factor = 2.0 * fast_dot(v, q) / mnorm2
+        # mnorm2 = m.square().sum(dim=-1, keepdim=True)
+        # mnorm2 = 2.0 + 2.0 * fast_dot(p, q)
+        mnorm2 = 1.0 + fast_dot(p, q)
+        # factor = 2.0 * fast_dot(v, q) / mnorm2
+        factor = fast_dot(v / mnorm2, q)
         return v - m * factor
+
+    def parallel_transport_alt(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
+        """
+        See `Manifold.parallel_transport`. Based on geomstats.
+        """
+        direction = self.log_map(p, q)
+        theta = direction.norm(dim=-1, keepdim=True)
+        eps = torch.where(theta == 0.0, 1.0, theta)
+        normalized_b = direction / eps
+        pb = fast_dot(v, normalized_b)
+        p_orth = v - pb * normalized_b
+        return (
+            - theta.sin() * pb * p
+            + theta.cos() * pb * normalized_b
+            + p_orth
+        )
+
+    def make_tangent_alt(self, p: Tensor, v: Tensor) -> Tensor:
+        """
+        Alternative. See `Manifold.make_tangent`.
+        """
+        # alternative version:
+        # p_unit = p / p.norm(dim=-1, keepdim=True)
+        p_unit = torch.nn.functional.normalize(p, p=2, dim=-1)
+        normalized = v / (p_unit * v).sum(dim=-1, keepdim=True)
+        ret = normalized - p
+        return ret
 
     def make_tangent(self, p: Tensor, v: Tensor) -> Tensor:
         """
         See `Manifold.make_tangent`.
         """
-        # alternative version:
-        normalized = p.norm(dim=-1, keepdim=True) * v / ((p * v).sum(dim=-1, keepdim=True))
-        return normalized - p
-
-    def make_tangent_old_version(self, p: Tensor, v: Tensor) -> Tensor:
-        """
-        Old version of `make_tangent`. Less precise.
-        """
-        # p = p.abs()
+        # TODO: remove?
+        p = p.abs()
         # return v - p * fast_dot(p, v)
         # keep the normalisation even if = 1: more precise!
         sq = p.square().sum(dim=-1, keepdim=True)
         inner = fast_dot(p / sq, v, keepdim=True)
         # coef = inner / sq
-        print((inner * p).min(), (inner * p).max())
         ret = v - inner * p
         # dirty trick that makes it a tiny bit more precise
         # ret[:, :, 0] = ret[:, :, 0] - (p * ret).sum(dim=-1)
@@ -461,7 +483,7 @@ class NSphere(Manifold):
         """
         See `Manifold.all_belong_tangent`.
         """
-        return torch.allclose(fast_dot(x, v), torch.tensor(0.0))
+        return torch.allclose(fast_dot(x, v), torch.tensor(0.0), atol=1e-5)
 
 
 def manifold_from_name(name: str) -> Manifold:
