@@ -121,8 +121,8 @@ class TestManifoldsGeneral(unittest.TestCase):
 
     def __init__(self, *args):
         super().__init__(*args)
-        self.seq_len = 4
-        self.dim = 160
+        self.seq_len = 30
+        self.dim = 320
         self.manifolds = [
             # NSimplex(),
             NSphere(),
@@ -150,7 +150,7 @@ class TestManifoldsGeneral(unittest.TestCase):
         for manifold in self.manifolds:
             for d in range(5, 100, 5):
                 set_seeds(d)
-                x = torch.nn.functional.one_hot(torch.randint(0, d, (10, self.seq_len)), d)
+                x = torch.nn.functional.one_hot(torch.randint(0, d, (10, self.seq_len)), d).float()
                 self.assertTrue(
                     manifold.all_belong(x), "all one-hot encoded points must be on simplex"
                 )
@@ -177,7 +177,6 @@ class TestManifoldsGeneral(unittest.TestCase):
             y = manifold.uniform_prior(500, self.seq_len, self.dim)
             back = manifold.exp_map(x, manifold.log_map(x, y))
             # TODO is 1e-7 good enough?
-            print(back.dtype, y.dtype)
             testing.assert_close(
                 back, y, rtol=1e-5, atol=1e-7,
             )
@@ -194,8 +193,12 @@ class TestManifoldsGeneral(unittest.TestCase):
             set_seeds(2)
             p = manifold.uniform_prior(points, seq_len, dim)
             q = manifold.uniform_prior(points, seq_len, dim)
+            assert manifold.all_belong(p) and manifold.all_belong(q), "not on manifold"
             v = torch.rand((points, seq_len, dim))
             v = manifold.make_tangent(p, v)
+            curr = (v * p).sum(dim=-1).abs()
+            print(curr.min(), curr.max(), curr.mean(), curr.std())
+            assert manifold.all_belong_tangent(p, v), "not tangent initially"
             transported = manifold.parallel_transport(p, q, v)
             if type(manifold).__name__ == "NSimplex":
                 testing.assert_close(

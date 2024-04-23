@@ -220,30 +220,17 @@ class Manifold(ABC):
         """
 
     @abstractmethod
-    def belongs(self, x: Tensor, eps: float = 1e-7) -> Tensor:
-        """
-        Returns a Tensor that indicates whether each point belongs to the manifold.
-        """
-
-    def all_belong(self, x: Tensor, eps: float = 1e-7) -> Tensor:
+    def all_belong(self, x: Tensor) -> bool:
         """
         Returns `True` iff all points belong to the manifold.
         """
-        return self.belongs(x, eps).all()
 
     @abstractmethod
-    def belongs_tangent(self, x: Tensor, v: Tensor, eps: float = 1e-7) -> Tensor:
-        """
-        Returns a Tensor that indicates whether each tangent vector
-        belongs to the tangent space of the manifold at point `x`.
-        """
-
-    def all_belong_tangent(self, x: Tensor, v: Tensor, eps: float = 1e-7) -> Tensor:
+    def all_belong_tangent(self, x: Tensor, v: Tensor) -> bool:
         """
         Returns `True` iff all tangent vectors belong to the tangent space of the manifold
         at point `x`.
         """
-        return self.belongs_tangent(x, v, eps).all()
 
 
 class NSimplex(Manifold):
@@ -345,17 +332,17 @@ class NSimplex(Manifold):
             return x
         raise NotImplementedError(f"unimplemented for {m}")
 
-    def belongs(self, x: Tensor, eps: float = 1e-7) -> Tensor:
+    def all_belong(self, x: Tensor) -> bool:
         """
-        See `Manifold.belongs`.
+        See `Manifold.all_belong`.
         """
-        return (x.sum(dim=-1) - 1.0).abs() < eps
+        return torch.allclose(x.sum(dim=-1), torch.tensor(1.0))
 
-    def belongs_tangent(self, x: Tensor, v: Tensor, eps: float = 1e-7) -> Tensor:
+    def all_belong_tangent(self, x: Tensor, v: Tensor) -> bool:
         """
-        See `Manifold.belongs_tangent`.
+        See `Manifold.all_belong_tangent`.
         """
-        return v.sum(dim=-1).abs() < eps
+        return torch.allclose(v.sum(dim=-1), torch.tensor(0.0))
 
 
 class NSphere(Manifold):
@@ -412,8 +399,25 @@ class NSphere(Manifold):
         """
         See `Manifold.make_tangent`.
         """
-        p = p.abs()
-        return v - p * fast_dot(p, v)
+        # alternative version:
+        normalized = p.norm(dim=-1, keepdim=True) * v / ((p * v).sum(dim=-1, keepdim=True))
+        return normalized - p
+
+    def make_tangent_old_version(self, p: Tensor, v: Tensor) -> Tensor:
+        """
+        Old version of `make_tangent`. Less precise.
+        """
+        # p = p.abs()
+        # return v - p * fast_dot(p, v)
+        # keep the normalisation even if = 1: more precise!
+        sq = p.square().sum(dim=-1, keepdim=True)
+        inner = fast_dot(p / sq, v, keepdim=True)
+        # coef = inner / sq
+        print((inner * p).min(), (inner * p).max())
+        ret = v - inner * p
+        # dirty trick that makes it a tiny bit more precise
+        # ret[:, :, 0] = ret[:, :, 0] - (p * ret).sum(dim=-1)
+        return ret
 
     def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
         """
@@ -439,17 +443,25 @@ class NSphere(Manifold):
             return x.square()
         raise NotImplementedError(f"unimplemented for {m}")
 
-    def belongs(self, x: Tensor, eps: float = 1e-6) -> Tensor:
+    def batch_square_norm(self, x: Tensor) -> Tensor:
         """
-        See `Manifold.belongs`.
+        Returns the square of the euclidean norm of `x` in the last coordinate.
         """
-        return (x.square().sum(dim=-1) - 1.0).abs() < eps
+        return x.square().sum(dim=-1)
 
-    def belongs_tangent(self, x: Tensor, v: Tensor, eps: float = 1e-7) -> Tensor:
+    def all_belong(self, x: Tensor) -> bool:
         """
-        See `Manifold.belongs_tangent`.
+        See `Manifold.all_belong`.
         """
-        return fast_dot(x, v).abs() < eps
+        return (
+            torch.allclose(self.batch_square_norm(x), torch.tensor(1.0))
+        )
+
+    def all_belong_tangent(self, x: Tensor, v: Tensor) -> bool:
+        """
+        See `Manifold.all_belong_tangent`.
+        """
+        return torch.allclose(fast_dot(x, v), torch.tensor(0.0))
 
 
 def manifold_from_name(name: str) -> Manifold:

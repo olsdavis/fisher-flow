@@ -65,7 +65,8 @@ class SFMModule(LightningModule):
         Perform a single model step on a batch of data.
         """
         return ot_train_step(
-            self.manifold.smooth_labels(x_1, mx=0.999),
+            # self.manifold.smooth_labels(x_1, mx=0.999),
+            x_1,
             self.manifold,
             self.net,
             self.sampler,
