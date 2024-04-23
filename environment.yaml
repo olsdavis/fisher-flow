@@ -41,6 +41,8 @@ dependencies:
     - wandb==0.16.5
     - geomstats==2.7.0
     - ipdb==0.13.13
+    - rdkit==2023.9.5
+    - torch_geometric==2.5.3
 
   # --------- loggers --------- #
   # - wandb
