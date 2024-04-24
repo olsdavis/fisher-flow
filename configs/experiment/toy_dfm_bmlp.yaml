@@ -1,0 +1,44 @@
+# @package _global_
+
+# to execute this experiment run:
+# python train.py experiment=example
+
+defaults:
+  - override /data: toy_dfm
+  - override /model: toy_bmlp
+  - override /callbacks: default
+  - override /trainer: default
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+
+tags: ["toy_dfm", "bmlp"]
+
+seed: 12345
+
+trainer:
+  min_epochs: 1
+  max_epochs: 1000
+  gradient_clip_val: 1.0
+
+model:
+  optimizer:
+    lr: 0.001
+  net:
+    k: ${data.k}
+    dim: ${data.dim}
+  compile: false
+  manifold: "sphere"
+  kl_eval: true
+
+data:
+  batch_size: 512
+  k: 4
+  dim: 100
+
+logger:
+  wandb:
+    tags: ${tags}
+    group: "toy_dfm"
+  aim:
+    experiment: "toy_dfm"
