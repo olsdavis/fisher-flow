@@ -53,7 +53,9 @@ def estimate_categorical_kl(
     acc = torch.zeros_like(real_dist, device=real_dist.device)
 
     model.eval()
-    to_sample = [batch] * (n // batch) + [n % batch]
+    to_sample = [batch] * (n // batch)
+    if n % batch != 0:
+        to_sample += [n % batch]
     for draw in (tqdm.tqdm(to_sample) if not silent else to_sample):
         x_0 = manifold.uniform_prior(
             draw, real_dist.size(0), real_dist.size(1),

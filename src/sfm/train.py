@@ -76,8 +76,9 @@ def cft_loss_function(
     if sampler:
         x_0, x_1 = sampler.sample_plan(x_0, x_1)
     x_t = m.geodesic_interpolant(x_0, x_1, t)
-    target = m.log_map(x_0, x_1)
-    target = m.parallel_transport(x_0, x_t, target)
+    # target = m.log_map(x_0, x_1)
+    # target = m.parallel_transport(x_0, x_t, target)
+    target = m.log_map(x_t, x_1)
     out = model(x_t, t)
     out = m.make_tangent(x_t, out)
     # TODO: Check this
