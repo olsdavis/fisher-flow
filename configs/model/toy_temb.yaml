@@ -1,0 +1,28 @@
+_target_: src.models.SFMModule
+
+optimizer:
+  _target_: torch.optim.AdamW
+  _partial_: true
+  lr: 0.001
+  weight_decay: 0.0
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+  _partial_: true
+  mode: min
+  factor: 0.1
+  patience: 10
+
+net:
+  _target_: src.models.net.TembMLP
+  hidden: 512
+  depth: 3
+  emb_size: 128
+  time_emb: sinusoidal
+  input_emb: sinusoidal
+  add_t_emb: false
+  concat_t_emb: false
+  activation: lrelu
+
+
+compile: false

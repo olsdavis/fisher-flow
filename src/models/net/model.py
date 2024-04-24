@@ -6,11 +6,6 @@ import torch.nn.functional as F
 import numpy as np
 
 
-def expand_simplex(xt, alphas, prior_pseudocount):
-    prior_weights = (prior_pseudocount / (alphas + prior_pseudocount - 1))[:, None, None]
-    return torch.cat([xt * (1 - prior_weights), xt * prior_weights], -1), prior_weights
-
-
 def str_to_activation(name: str) -> nn.Module:
     """
     Returns the activation function associated to the name `name`.
@@ -606,3 +601,8 @@ class CNNModel(nn.Module):
             else:
                 return self.cls_head(feat)
         return feat
+
+
+def expand_simplex(xt, alphas, prior_pseudocount):
+    prior_weights = (prior_pseudocount / (alphas + prior_pseudocount - 1))[:, None, None]
+    return torch.cat([xt * (1 - prior_weights), xt * prior_weights], -1), prior_weights

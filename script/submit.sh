@@ -9,4 +9,4 @@
 #SBATCH --gres=gpu:1
 conda activate sfm
 # srun -u python main.py -e dfm_toy -c config/toy_dfm/bmlp.yml -m sphere --wandb
-srun -u python -m src.train experiment=toy_dfm_bmlp trainer=gpu logger=wandb
+srun -u python -m src.train experiment=toy_dfm_bmlp trainer=gpu data.dim=$1 data.batch_size=1024 logger=wandb
