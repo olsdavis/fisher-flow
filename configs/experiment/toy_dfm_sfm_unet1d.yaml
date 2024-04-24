@@ -5,7 +5,7 @@
 
 defaults:
   - override /data: toy_dfm
-  - override /model: toy_cnn_sfm
+  - override /model: toy_unet1d
   - override /callbacks: default
   - override /trainer: default
 
@@ -19,7 +19,7 @@ seed: 12345
 trainer:
   min_epochs: 1
   max_epochs: 1000
-  gradient_clip_val: 0.64
+  gradient_clip_val: 1.0
 
 model:
   optimizer:
@@ -27,8 +27,6 @@ model:
   net:
     k: ${data.k}
     dim: ${data.dim}
-    activation: lrelu
-    label_smoothing: 0.81
   compile: false
   manifold: sphere
   kl_eval: true

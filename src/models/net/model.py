@@ -466,6 +466,34 @@ class BestMLP(nn.Module):
         return x
 
 
+class UNet1DModel(nn.Module):
+    """
+    Adaptation of diffusers UNet1D.
+    """
+    from diffusers.models import UNet1DModel as DiffusersUNet
+
+    def __init__(
+        self,
+        k: int,
+        dim: int,
+        activation: str = "gelu",
+    ):
+        super().__init__()
+        self.diffusers_unet = self.DiffusersUNet(
+            sample_size=dim,
+            in_channels=k,
+            out_channels=k,
+            block_out_channels=(64, 64,),
+            down_block_types=("DownBlock1D", "AttnDownBlock1D"),
+            up_block_types=("AttnUpBlock1D", "UpBlock1D"),
+            act_fn=activation,
+            norm_num_groups=8,
+        )
+
+    def forward(self, x: Tensor, t: Tensor) -> Tensor:
+        return self.diffusers_unet(x, t.squeeze(), return_dict=False)[0]
+
+
 class GaussianFourierProjection(nn.Module):
     """
     Gaussian random features for encoding time steps.

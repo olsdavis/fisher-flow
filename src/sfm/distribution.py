@@ -4,6 +4,7 @@ import torch
 from torch import Tensor, nn
 from torch.distributions.dirichlet import Dirichlet
 import numpy as np
+import tqdm
 from src.sfm import Manifold, NSimplex
 
 
@@ -25,6 +26,7 @@ def estimate_categorical_kl(
     batch: int = 512,
     inference_steps: int = 100,
     sampling_mode: str = "max",
+    silent: bool = False,
 ) -> float:
     """
     Estimates the categorical KL divergence between points produced by the
@@ -51,9 +53,8 @@ def estimate_categorical_kl(
     acc = torch.zeros_like(real_dist, device=real_dist.device)
 
     model.eval()
-    to_draw = n
-    while to_draw > 0:
-        draw = min(batch, to_draw)
+    to_sample = [batch] * (n // batch) + [n % batch]
+    for draw in (tqdm.tqdm(to_sample) if not silent else to_sample):
         x_0 = manifold.uniform_prior(
             draw, real_dist.size(0), real_dist.size(1),
         ).to(real_dist.device)
@@ -69,7 +70,6 @@ def estimate_categorical_kl(
                 real_dist.size(-1),
             )
             acc += samples.sum(dim=0)
-        to_draw -= draw
 
     acc /= float(n)
     ret = (acc * (acc.log() - real_dist.log())).sum().item()

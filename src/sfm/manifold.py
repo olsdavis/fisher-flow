@@ -114,6 +114,7 @@ class Manifold(ABC):
             x = self.exp_map(x, self.make_tangent(x, model(x, t)) * dt)
         return x
 
+    @torch.no_grad()
     def pairwise_geodesic_distance(
         self,
         x_0: Tensor,
@@ -123,23 +124,17 @@ class Manifold(ABC):
         Computes the pairwise distances between `x_0` and `x_1`.
         Based on: `https://github.com/DreamFold/FoldFlow/blob/main/FoldFlow/utils/optimal_transport.py`.
         """
-        # points
-        n = x_0.size(0)
-        # if on product space
-        prods = 0 if len(x_0.shape) == 2 else x_0.size(1)
-        # dimension on product space
-        d = x_0.size(-1)
+        n, prods, d = x_0.shape
 
-        if prods > 0:
-            x_0 = rearrange(x_0, 'b c d -> b (c d)', c=prods, d=d)
-            x_1 = rearrange(x_1, 'b c d -> b (c d)', c=prods, d=d)
+        x_0 = rearrange(x_0, 'b c d -> b (c d)', c=prods, d=d)
+        x_1 = rearrange(x_1, 'b c d -> b (c d)', c=prods, d=d)
 
         x_0 = x_0.repeat_interleave(n, dim=0)
         x_1 = x_1.repeat(n, 1)
 
-        if prods > 0:
-            x_0 = rearrange(x_0, 'b (c d) -> b c d', c=prods, d=d)
-            x_1 = rearrange(x_1, 'b (c d) -> b c d', c=prods, d=d)
+        x_0 = rearrange(x_0, 'b (c d) -> b c d', c=prods, d=d)
+        x_1 = rearrange(x_1, 'b (c d) -> b c d', c=prods, d=d)
+
         distances = self.geodesic_distance(x_0, x_1) ** 2
         return distances.reshape(n, n)
 
@@ -276,7 +271,7 @@ class NSimplex(Manifold):
         """
         # can just ignore points that have some zero coordinates
         # ie on the boundary; doesn't work with mask (changes shape)
-        return ((u * v) / x).sum(dim=-1, keepdim=True)
+        return ((u * v) / x.sqrt()).sum(dim=-1, keepdim=True)
 
     def parallel_transport(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
         """

@@ -1,6 +1,7 @@
 from typing import Any
 import torch
 from lightning import LightningModule
+from lightning.pytorch.callbacks import TQDMProgressBar
 from torchmetrics import MeanMetric
 
 
@@ -32,6 +33,10 @@ class SFMModule(LightningModule):
         # this line allows to access init params with 'self.hparams' attribute
         # also ensures init params will be stored in ckpt
         self.save_hyperparameters(logger=False)
+        self.smoothing = self.hparams.get("label_smoothing", 0)
+        # if basically zero or zero
+        if self.smoothing < 1e-8:
+            self.smoothing = None
 
         if compile:
             self.net = torch.compile(net)
@@ -65,8 +70,7 @@ class SFMModule(LightningModule):
         Perform a single model step on a batch of data.
         """
         return ot_train_step(
-            # self.manifold.smooth_labels(x_1, mx=0.999),
-            x_1,
+            self.manifold.smooth_labels(x_1, mx=self.smoothing) if self.smoothing else x_1,
             self.manifold,
             self.net,
             self.sampler,
@@ -129,7 +133,7 @@ class SFMModule(LightningModule):
             return
         # evaluate KL
         real_probs = self.trainer.test_dataloaders.dataset.probs.to(self.device)
-        kl = estimate_categorical_kl(self.net, self.manifold, real_probs, self.kl_samples)
+        kl = estimate_categorical_kl(self.net, self.manifold, real_probs, self.kl_samples, batch=2048)
         self.log("test/kl", kl, on_step=False, on_epoch=True, prog_bar=False)
 
     def setup(self, stage: str):
