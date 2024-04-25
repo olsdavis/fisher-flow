@@ -1,5 +1,7 @@
+from functools import partial
 from typing import Any
 import torch
+from torch.nn import functional as F
 from lightning import LightningModule
 from torchmetrics import MeanMetric
 
@@ -11,6 +13,7 @@ from src.sfm import (
     manifold_from_name,
     ot_train_step,
 )
+from src.data.components.promoter_eval import eval_sp_mse, get_sei_profile
 
 
 class SFMModule(LightningModule):
@@ -25,6 +28,7 @@ class SFMModule(LightningModule):
         scheduler: torch.optim.lr_scheduler,
         compile: bool,
         manifold: str = "sphere",
+        promoter_eval: bool = False,
         kl_eval: bool = False,
         kl_samples: int = 512_000,
         label_smoothing: float | None = None,
@@ -41,6 +45,7 @@ class SFMModule(LightningModule):
         self.save_hyperparameters(logger=False)
         # if basically zero or zero
         self.smoothing = label_smoothing if label_smoothing and label_smoothing > 1e-6 else None
+        self.promoter_eval = promoter_eval
 
         if compile:
             self.net = torch.compile(net)
@@ -123,6 +128,17 @@ class SFMModule(LightningModule):
         # update and log metrics
         self.val_loss(loss)
         self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
+        if self.promoter_eval:
+            eval_model = partial(self.net, signal=signal)
+            pred = self.manifold.tangent_euler(
+                self.manifold.uniform_prior(*x_1.shape[:-1], 4).to(x_1.device),
+                eval_model,
+                steps=100,
+            )
+            mx = torch.argmax(x_1, dim=-1)
+            one_hot = F.one_hot(mx, num_classes=4)
+            mse = eval_sp_mse(one_hot, pred)
+            self.log("val/sp-mse", mse, on_step=False, on_epoch=True, prog_bar=False)
 
     def on_validation_epoch_end(self) -> None:
         """Lightning hook that is called when a validation epoch ends."""
