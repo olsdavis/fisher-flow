@@ -31,6 +31,7 @@ def ot_train_step(
     model: nn.Module,
     sampler: OTSampler | None,
     time_eps: float = 0.0,
+    signal: Tensor | None = None,
 ) -> tuple[Tensor, Tensor, Tensor]:
     """
     Returns the loss for a single (OT-)CFT training step along with the
@@ -41,14 +42,15 @@ def ot_train_step(
         - `m`: manifold;
         - `model`: the model to apply;
         - `sampler` (optional): the sampler for the OT plan;
-        - `time_eps`: "guard" for sampling the time.
+        - `time_eps`: "guard" for sampling the time;
+        - `signal` (optional): extra signal for some datasets.
     """
     b = x_1.size(0)
     k = x_1.size(1)
     d = x_1.size(-1)
     t = torch.rand((b, 1), device=x_1.device) * (1.0 - time_eps)
     x_0 = m.uniform_prior(b, k, d).to(x_1.device)
-    return cft_loss_function(x_0, x_1, t, m, model, sampler)
+    return cft_loss_function(x_0, x_1, t, m, model, sampler, signal=signal)
 
 
 def cft_loss_function(
@@ -58,6 +60,7 @@ def cft_loss_function(
     m: Manifold,
     model: nn.Module,
     sampler: OTSampler | None,
+    signal: Tensor | None = None,
 ) -> tuple[Tensor, Tensor, Tensor]:
     """
     Our CFT loss function. If `sampler` is provided, OT-CFT loss is calculated.
@@ -68,7 +71,8 @@ def cft_loss_function(
         - `t`: the times;
         - `m`: the manifold;
         - `model`: the model to apply;
-        - `sampler` (optional): the sampler for the OT plan.
+        - `sampler` (optional): the sampler for the OT plan;
+        - `signal` (optional): extra signal for some datasets.
     
     Returns:
         The loss tensor, the model output, and the target vector.
@@ -79,7 +83,10 @@ def cft_loss_function(
     target = m.log_map(x_0, x_1)
     target = m.parallel_transport(x_0, x_t, target)
     # target = m.log_map(x_t, x_1)
-    out = model(x_t, t)
+    if signal is not None:
+        out = model(x_t, signal, t)
+    else:
+        out = model(x_t, t)
     out = m.make_tangent(x_t, out)
     # TODO: Check this
     # print(out.norm(dim=-1).sum(dim=1).max(), target.norm(dim=-1).sum(dim=1).min())

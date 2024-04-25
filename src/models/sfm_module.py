@@ -1,11 +1,16 @@
 from typing import Any
 import torch
 from lightning import LightningModule
-from lightning.pytorch.callbacks import TQDMProgressBar
 from torchmetrics import MeanMetric
 
 
-from src.sfm import Manifold, OTSampler, estimate_categorical_kl, manifold_from_name, ot_train_step
+from src.sfm import (
+    Manifold,
+    OTSampler,
+    estimate_categorical_kl,
+    manifold_from_name,
+    ot_train_step,
+)
 
 
 class SFMModule(LightningModule):
@@ -63,7 +68,7 @@ class SFMModule(LightningModule):
         self.val_loss.reset()
 
     def model_step(
-        self, x_1: torch.Tensor
+        self, x_1: torch.Tensor, signal: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Perform a single model step on a batch of data.
@@ -73,10 +78,11 @@ class SFMModule(LightningModule):
             self.manifold,
             self.net,
             self.sampler,
+            signal=signal,
         )[0]
 
     def training_step(
-        self, x_1: torch.Tensor, batch_idx: int,
+        self, x_1: torch.Tensor | tuple[torch.Tensor, torch.Tensor], batch_idx: int,
     ) -> torch.Tensor:
         """Perform a single training step on a batch of data from the training set.
 
@@ -85,7 +91,11 @@ class SFMModule(LightningModule):
         :param batch_idx: The index of the current batch.
         :return: A tensor of losses between model predictions and targets.
         """
-        loss = self.model_step(x_1)
+        if isinstance(x_1, list):
+            x_1, signal = x_1
+            loss = self.model_step(x_1, signal)
+        else:
+            loss = self.model_step(x_1)
 
         # update and log metrics
         self.train_loss(loss)
@@ -97,14 +107,18 @@ class SFMModule(LightningModule):
     def on_train_epoch_end(self) -> None:
         """Nothing to do."""
 
-    def validation_step(self, x_1: torch.Tensor, batch_idx: int) -> None:
+    def validation_step(self, x_1: torch.Tensor | list[torch.Tensor], batch_idx: int) -> None:
         """Perform a single validation step on a batch of data from the validation set.
 
         :param batch: A batch of data (a tuple) containing the input tensor of images and target
             labels.
         :param batch_idx: The index of the current batch.
         """
-        loss = self.model_step(x_1)
+        if isinstance(x_1, list):
+            x_1, signal = x_1
+            loss = self.model_step(x_1, signal)
+        else:
+            loss = self.model_step(x_1)
 
         # update and log metrics
         self.val_loss(loss)
@@ -113,14 +127,18 @@ class SFMModule(LightningModule):
     def on_validation_epoch_end(self) -> None:
         """Lightning hook that is called when a validation epoch ends."""
 
-    def test_step(self, batch: torch.Tensor, batch_idx: int):
+    def test_step(self, x_1: torch.Tensor | list[torch.Tensor], batch_idx: int):
         """Perform a single test step on a batch of data from the test set.
 
         :param batch: A batch of data (a tuple) containing the input tensor of images and target
             labels.
         :param batch_idx: The index of the current batch.
         """
-        loss = self.model_step(batch)
+        if isinstance(x_1, list):
+            x_1, signal = x_1
+            loss = self.model_step(x_1, signal)
+        else:
+            loss = self.model_step(x_1)
 
         # update and log metrics
         self.test_loss(loss)

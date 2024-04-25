@@ -1263,7 +1263,8 @@ class PromoterDataset(torch.utils.data.Dataset):
                                                 pos + int(self.seqlength / 2) + offset)
         if strand == '-':
             signal = signal[::-1, ::-1]
-        return np.concatenate([seq, signal.T], axis=-1).astype(np.float32)
+        # return np.concatenate([seq, signal.T], axis=-1).astype(np.float32)
+        return seq.astype(np.float32), signal.T.astype(np.float32)
 
     def reset(self):
         np.random.seed(0)

@@ -5,14 +5,14 @@
 
 defaults:
   - override /data: promoter_design
-  - override /model: toy_cnn_sfm
+  - override /model: promoter_model
   - override /callbacks: default
   - override /trainer: default
 
 # all parameters below will be merged with parameters from default configurations set above
 # this allows you to overwrite only specified parameters
 
-tags: ["promoter_design", "sfm_cnn"]
+tags: ["promoter_design", "promoter_model"]
 
 seed: 12345
 
@@ -22,13 +22,9 @@ trainer:
   gradient_clip_val: 1.0
 
 model:
-  optimizer:
-    lr: 0.001
-  net:
-    k: 1024
-    dim: 6
-    manifold: sphere
   compile: false
+  net:
+    mode: sfm  # just ignores the custom stuff
 
 logger:
   wandb:

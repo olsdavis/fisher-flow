@@ -131,4 +131,4 @@ if __name__ == "__main__":
     mod.setup()
     data_loader = mod.train_dataloader()
     x = next(iter(data_loader))
-    print(print(x.sum(dim=-1)[0, :25]))
+    print(print(x[0, :25]))
