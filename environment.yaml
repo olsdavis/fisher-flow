@@ -43,6 +43,7 @@ dependencies:
     - ipdb==0.13.13
     - rdkit==2023.9.5
     - torch_geometric==2.5.3
+    - selene-sdk==0.4.4
 
   # --------- loggers --------- #
   # - wandb

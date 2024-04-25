@@ -8,3 +8,4 @@ slurm/
 logs/
 *.csv
 *.pt
+pytabix_fix/

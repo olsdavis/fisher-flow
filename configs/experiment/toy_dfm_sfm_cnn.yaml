@@ -28,7 +28,7 @@ model:
     k: ${data.k}
     dim: ${data.dim}
     activation: lrelu
-    # label_smoothing: 0.81
+  label_smoothing: 0.81
   compile: false
   manifold: sphere
   kl_eval: true

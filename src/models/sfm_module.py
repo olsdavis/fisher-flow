@@ -22,6 +22,7 @@ class SFMModule(LightningModule):
         manifold: str = "sphere",
         kl_eval: bool = False,
         kl_samples: int = 512_000,
+        label_smoothing: float | None = None,
     ) -> None:
         """
         :param net: The model to train.
@@ -33,10 +34,8 @@ class SFMModule(LightningModule):
         # this line allows to access init params with 'self.hparams' attribute
         # also ensures init params will be stored in ckpt
         self.save_hyperparameters(logger=False)
-        self.smoothing = self.hparams.get("label_smoothing", 0)
         # if basically zero or zero
-        if self.smoothing < 1e-8:
-            self.smoothing = None
+        self.smoothing = label_smoothing if label_smoothing and label_smoothing > 1e-6 else None
 
         if compile:
             self.net = torch.compile(net)
@@ -69,6 +68,7 @@ class SFMModule(LightningModule):
         """
         Perform a single model step on a batch of data.
         """
+        print(self.smoothing)
         return ot_train_step(
             self.manifold.smooth_labels(x_1, mx=self.smoothing) if self.smoothing else x_1,
             self.manifold,
