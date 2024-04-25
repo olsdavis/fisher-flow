@@ -5,47 +5,25 @@ import numpy as np
 import torch
 import tqdm
 from torch import nn
-from torch.utils.data import DataLoader, Dataset, TensorDataset
+from torch.utils.data import DataLoader, Dataset
 from lightning import LightningDataModule
+from .components.promoter_back import PromoterDataset
 
 
-class Text8Dataset(torch.utils.data.IterableDataset):
+class PromoterDesignDataModule(LightningDataModule):
     """
-    Adapted from `https://github.com/andrew-cr/discrete_flow_models/blob/main/train.py`
-    """
-    def __init__(self, dataset: torch.Tensor, vocab_size: int, block_size: int, split: str = 'train'):
-        super().__init__()
-        self.dataset = dataset.long()  # dataset is a Tensor
-        self.vocab_size = vocab_size
-        self.block_size = block_size
-        self.split = split
-
-    def __len__(self) -> int:
-        return self.dataset.size(0)
-
-    def __iter__(self):
-        for i in range(len(self)):
-            one_hot = nn.functional.one_hot(self.dataset[i], self.vocab_size).float()
-            # if there is a need to smooth labels, it is done in the model's training step
-            yield one_hot
-
-
-class Text8DataModule(LightningDataModule):
-    """
-    Text8 data module.
+    Promoter Design data module.
     """
 
     def __init__(
         self,
-        k: int = 256,
-        dim: int = 27,
-        data_dir: str = "data/text8",
+        data_dir: str = "data/promoter/",
         train_val_test_split: tuple[int, int, int] = (55_000, 5_000, 10_000),
         batch_size: int = 64,
         num_workers: int = 0,
         pin_memory: bool = False,
     ):
-        """Initialize a `Text8DataModule`.
+        """Initialize a `PromoterDesignDataModule`.
 
         :param data_dir: The data directory. Defaults to `"data/text8"`.
         :param train_val_test_split: Not used. The train, validation and test split. Defaults to `(55_000, 5_000, 10_000)`.
@@ -58,8 +36,6 @@ class Text8DataModule(LightningDataModule):
         # this line allows to access init params with 'self.hparams' attribute
         # also ensures init params will be stored in ckpt
         self.save_hyperparameters(logger=False)
-        # corresponds to window size
-        self.k = k
 
         self.data_train: Dataset | None = None
         self.data_val: Dataset | None = None
@@ -69,43 +45,9 @@ class Text8DataModule(LightningDataModule):
 
     def prepare_data(self):
         """Nothing to download."""
-        data_dir = self.hparams.data_dir
-        meta_path = os.path.join(data_dir, 'meta.pkl')
-        print(f"loading meta from {meta_path}")
-        assert os.path.exists(meta_path)
-        with open(meta_path, 'rb') as f:
-            self.meta = pickle.load(f)
-        self.meta_vocab_size = self.meta['vocab_size']
-        print(f"found vocab_size = {self.meta_vocab_size} (inside {meta_path})")
-
-        self.stoi = self.meta['stoi']
-        self.itos = self.meta['itos']
-
-        # increase vocab size by 1 to include a mask token
-        self.meta_vocab_size += 1
-        self.mask_token_id = self.meta_vocab_size - 1
-        self.stoi['X'] = self.mask_token_id
-        self.itos[self.mask_token_id] = 'X'
-        def build_blocks(data, k):
-            blocks = []
-            for i in tqdm.tqdm(range(0, len(data), k)):
-                if i + k > len(data):
-                    # for the last one, pad with zeros of the same size
-                    block = np.concatenate(
-                        [data[i:].astype(np.int16), np.zeros((i + k - len(data)), dtype=np.int16)]
-                    )
-                else:
-                    block = data[i:i + k].astype(np.int16)
-                assert block.shape == (k,)
-                blocks += [torch.Tensor(block)]
-            return blocks
-        data_train_base = np.fromfile(os.path.join(data_dir, 'train.bin'), dtype=np.uint16)
-        data_val_base = np.fromfile(os.path.join(data_dir, 'val.bin'), dtype=np.uint16)
-        # build dataset
-        data_train = build_blocks(data_train_base, self.k)[:self.hparams.train_val_test_split[0]]
-        data_val = build_blocks(data_val_base, self.k)[:self.hparams.train_val_test_split[2]]
-        self.data_train = Text8Dataset(torch.stack(data_train), self.meta_vocab_size, self.k, "train")
-        self.data_val = Text8Dataset(torch.stack(data_val), self.meta_vocab_size, self.k, "val")
+        self.data_train = PromoterDataset(split="train")
+        self.data_val = PromoterDataset(split="valid")
+        self.data_test = PromoterDataset(split="test")
 
     def setup(self, stage: str | None = None) -> None:
         """
@@ -184,4 +126,9 @@ class Text8DataModule(LightningDataModule):
 
 
 if __name__ == "__main__":
-    _ = Text8DataModule().prepare_data()
+    mod = PromoterDesignDataModule()
+    mod.prepare_data()
+    mod.setup()
+    data_loader = mod.train_dataloader()
+    x = next(iter(data_loader))
+    print(print(x[0, :25]))

@@ -9,44 +9,23 @@ from torch.utils.data import DataLoader, Dataset, TensorDataset
 from lightning import LightningDataModule
 
 
-class Text8Dataset(torch.utils.data.IterableDataset):
+class DNAEnhancerDataModule(LightningDataModule):
     """
-    Adapted from `https://github.com/andrew-cr/discrete_flow_models/blob/main/train.py`
-    """
-    def __init__(self, dataset: torch.Tensor, vocab_size: int, block_size: int, split: str = 'train'):
-        super().__init__()
-        self.dataset = dataset.long()  # dataset is a Tensor
-        self.vocab_size = vocab_size
-        self.block_size = block_size
-        self.split = split
-
-    def __len__(self) -> int:
-        return self.dataset.size(0)
-
-    def __iter__(self):
-        for i in range(len(self)):
-            one_hot = nn.functional.one_hot(self.dataset[i], self.vocab_size).float()
-            # if there is a need to smooth labels, it is done in the model's training step
-            yield one_hot
-
-
-class Text8DataModule(LightningDataModule):
-    """
-    Text8 data module.
+    DNA Enhancer data module.
     """
 
     def __init__(
         self,
-        k: int = 256,
-        dim: int = 27,
-        data_dir: str = "data/text8",
+        dataset: str = "MEL2",
+        data_dir: str = "data/enhancer/",
         train_val_test_split: tuple[int, int, int] = (55_000, 5_000, 10_000),
         batch_size: int = 64,
         num_workers: int = 0,
         pin_memory: bool = False,
     ):
-        """Initialize a `Text8DataModule`.
+        """Initialize a `DNAEnhancerDataModule`.
 
+        :param dataset: The dataset to use, choices: "MEL2", "FlyBrain". Defaults to `"MEL2"`.
         :param data_dir: The data directory. Defaults to `"data/text8"`.
         :param train_val_test_split: Not used. The train, validation and test split. Defaults to `(55_000, 5_000, 10_000)`.
         :param batch_size: The batch size. Defaults to `64`.
@@ -54,12 +33,12 @@ class Text8DataModule(LightningDataModule):
         :param pin_memory: Whether to pin memory. Defaults to `False`.
         """
         super().__init__()
+        assert dataset in ["MEL2", "FlyBrain"], f"Invalid dataset '{dataset}'. Choose from 'MEL2', 'FlyBrain'."
+        self.dataset = dataset
 
         # this line allows to access init params with 'self.hparams' attribute
         # also ensures init params will be stored in ckpt
         self.save_hyperparameters(logger=False)
-        # corresponds to window size
-        self.k = k
 
         self.data_train: Dataset | None = None
         self.data_val: Dataset | None = None
@@ -68,44 +47,18 @@ class Text8DataModule(LightningDataModule):
         self.batch_size_per_device = batch_size
 
     def prepare_data(self):
-        """Nothing to download."""
-        data_dir = self.hparams.data_dir
-        meta_path = os.path.join(data_dir, 'meta.pkl')
-        print(f"loading meta from {meta_path}")
-        assert os.path.exists(meta_path)
-        with open(meta_path, 'rb') as f:
-            self.meta = pickle.load(f)
-        self.meta_vocab_size = self.meta['vocab_size']
-        print(f"found vocab_size = {self.meta_vocab_size} (inside {meta_path})")
-
-        self.stoi = self.meta['stoi']
-        self.itos = self.meta['itos']
-
-        # increase vocab size by 1 to include a mask token
-        self.meta_vocab_size += 1
-        self.mask_token_id = self.meta_vocab_size - 1
-        self.stoi['X'] = self.mask_token_id
-        self.itos[self.mask_token_id] = 'X'
-        def build_blocks(data, k):
-            blocks = []
-            for i in tqdm.tqdm(range(0, len(data), k)):
-                if i + k > len(data):
-                    # for the last one, pad with zeros of the same size
-                    block = np.concatenate(
-                        [data[i:].astype(np.int16), np.zeros((i + k - len(data)), dtype=np.int16)]
-                    )
-                else:
-                    block = data[i:i + k].astype(np.int16)
-                assert block.shape == (k,)
-                blocks += [torch.Tensor(block)]
-            return blocks
-        data_train_base = np.fromfile(os.path.join(data_dir, 'train.bin'), dtype=np.uint16)
-        data_val_base = np.fromfile(os.path.join(data_dir, 'val.bin'), dtype=np.uint16)
-        # build dataset
-        data_train = build_blocks(data_train_base, self.k)[:self.hparams.train_val_test_split[0]]
-        data_val = build_blocks(data_val_base, self.k)[:self.hparams.train_val_test_split[2]]
-        self.data_train = Text8Dataset(torch.stack(data_train), self.meta_vocab_size, self.k, "train")
-        self.data_val = Text8Dataset(torch.stack(data_val), self.meta_vocab_size, self.k, "val")
+        """Prepare data."""
+        all_data = pickle.load(
+            open(os.path.join(self.hparams.data_dir, f"{self.dataset}.pkl"), "rb")
+        )
+        for split in ["train", "val", "test"]:
+            data = torch.from_numpy(all_data[f"{split}_data"])  # already one-hot encoded
+            dataset = TensorDataset(data)
+            setattr(
+                self,
+                f"data_{split}",
+                dataset
+            )
 
     def setup(self, stage: str | None = None) -> None:
         """
@@ -184,4 +137,4 @@ class Text8DataModule(LightningDataModule):
 
 
 if __name__ == "__main__":
-    _ = Text8DataModule().prepare_data()
+    _ = DNAEnhancerDataModule().prepare_data()

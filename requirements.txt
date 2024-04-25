@@ -29,3 +29,10 @@ POT==0.9.3
 dirichlet==0.9
 einops==0.7.0
 selene-sdk==0.4.4
+biopython==1.83
+pyBigWig==0.3.22
+pyranges==0.0.129
+cooler==0.9.3
+cooltools==0.7.0
+rdkit==2023.9.5
+torch_geometric==2.5.3

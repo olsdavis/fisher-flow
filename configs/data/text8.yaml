@@ -1,7 +1,7 @@
 _target_: src.data.Text8DataModule
 data_dir: ${paths.data_dir}
 train_val_test_split: [100_000, 5_000, 10_000]
-num_workers: 8
+num_workers: 64
 pin_memory: true
 k: 256
 batch_size : 256

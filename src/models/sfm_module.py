@@ -1,11 +1,19 @@
+from functools import partial
 from typing import Any
 import torch
+from torch.nn import functional as F
 from lightning import LightningModule
-from lightning.pytorch.callbacks import TQDMProgressBar
 from torchmetrics import MeanMetric
 
 
-from src.sfm import Manifold, OTSampler, estimate_categorical_kl, manifold_from_name, ot_train_step
+from src.sfm import (
+    Manifold,
+    OTSampler,
+    estimate_categorical_kl,
+    manifold_from_name,
+    ot_train_step,
+)
+from src.data.components.promoter_eval import eval_sp_mse, get_sei_profile
 
 
 class SFMModule(LightningModule):
@@ -20,6 +28,7 @@ class SFMModule(LightningModule):
         scheduler: torch.optim.lr_scheduler,
         compile: bool,
         manifold: str = "sphere",
+        promoter_eval: bool = False,
         kl_eval: bool = False,
         kl_samples: int = 512_000,
         label_smoothing: float | None = None,
@@ -36,6 +45,7 @@ class SFMModule(LightningModule):
         self.save_hyperparameters(logger=False)
         # if basically zero or zero
         self.smoothing = label_smoothing if label_smoothing and label_smoothing > 1e-6 else None
+        self.promoter_eval = promoter_eval
 
         if compile:
             self.net = torch.compile(net)
@@ -63,21 +73,21 @@ class SFMModule(LightningModule):
         self.val_loss.reset()
 
     def model_step(
-        self, x_1: torch.Tensor
+        self, x_1: torch.Tensor, signal: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Perform a single model step on a batch of data.
         """
-        print(self.smoothing)
         return ot_train_step(
             self.manifold.smooth_labels(x_1, mx=self.smoothing) if self.smoothing else x_1,
             self.manifold,
             self.net,
             self.sampler,
+            signal=signal,
         )[0]
 
     def training_step(
-        self, x_1: torch.Tensor, batch_idx: int,
+        self, x_1: torch.Tensor | tuple[torch.Tensor, torch.Tensor], batch_idx: int,
     ) -> torch.Tensor:
         """Perform a single training step on a batch of data from the training set.
 
@@ -86,7 +96,11 @@ class SFMModule(LightningModule):
         :param batch_idx: The index of the current batch.
         :return: A tensor of losses between model predictions and targets.
         """
-        loss = self.model_step(x_1)
+        if isinstance(x_1, list):
+            x_1, signal = x_1
+            loss = self.model_step(x_1, signal)
+        else:
+            loss = self.model_step(x_1)
 
         # update and log metrics
         self.train_loss(loss)
@@ -98,30 +112,49 @@ class SFMModule(LightningModule):
     def on_train_epoch_end(self) -> None:
         """Nothing to do."""
 
-    def validation_step(self, x_1: torch.Tensor, batch_idx: int) -> None:
+    def validation_step(self, x_1: torch.Tensor | list[torch.Tensor], batch_idx: int) -> None:
         """Perform a single validation step on a batch of data from the validation set.
 
         :param batch: A batch of data (a tuple) containing the input tensor of images and target
             labels.
         :param batch_idx: The index of the current batch.
         """
-        loss = self.model_step(x_1)
+        if isinstance(x_1, list):
+            x_1, signal = x_1
+            loss = self.model_step(x_1, signal)
+        else:
+            loss = self.model_step(x_1)
 
         # update and log metrics
         self.val_loss(loss)
         self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
+        if self.promoter_eval:
+            eval_model = partial(self.net, signal=signal)
+            pred = self.manifold.tangent_euler(
+                self.manifold.uniform_prior(*x_1.shape[:-1], 4).to(x_1.device),
+                eval_model,
+                steps=100,
+            )
+            mx = torch.argmax(x_1, dim=-1)
+            one_hot = F.one_hot(mx, num_classes=4)
+            mse = eval_sp_mse(one_hot, pred)
+            self.log("val/sp-mse", mse, on_step=False, on_epoch=True, prog_bar=False)
 
     def on_validation_epoch_end(self) -> None:
         """Lightning hook that is called when a validation epoch ends."""
 
-    def test_step(self, batch: torch.Tensor, batch_idx: int):
+    def test_step(self, x_1: torch.Tensor | list[torch.Tensor], batch_idx: int):
         """Perform a single test step on a batch of data from the test set.
 
         :param batch: A batch of data (a tuple) containing the input tensor of images and target
             labels.
         :param batch_idx: The index of the current batch.
         """
-        loss = self.model_step(batch)
+        if isinstance(x_1, list):
+            x_1, signal = x_1
+            loss = self.model_step(x_1, signal)
+        else:
+            loss = self.model_step(x_1)
 
         # update and log metrics
         self.test_loss(loss)
