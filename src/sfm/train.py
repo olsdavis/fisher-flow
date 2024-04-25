@@ -61,6 +61,7 @@ def cft_loss_function(
     model: nn.Module,
     sampler: OTSampler | None,
     signal: Tensor | None = None,
+    eps: float = 1e-8,
 ) -> tuple[Tensor, Tensor, Tensor]:
     """
     Our CFT loss function. If `sampler` is provided, OT-CFT loss is calculated.
@@ -80,9 +81,7 @@ def cft_loss_function(
     if sampler:
         x_0, x_1 = sampler.sample_plan(x_0, x_1)
     x_t = m.geodesic_interpolant(x_0, x_1, t)
-    target = m.log_map(x_0, x_1)
-    target = m.parallel_transport(x_0, x_t, target)
-    # target = m.log_map(x_t, x_1)
+    target = m.log_map(x_t, x_1) / (1.0 - t.unsqueeze(-1) + eps)
     if signal is not None:
         out = model(x_t, signal, t)
     else:

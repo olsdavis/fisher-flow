@@ -31,7 +31,7 @@ class OTSampler:
         self.manifold = manifold
         self.ot_fn = str_to_ot_method(method, reg, reg_m)
         self.normalize_cost = normalize_cost
- 
+
     @torch.no_grad()
     def get_map(self, x0: Tensor, x1: Tensor) -> Tensor:
         """

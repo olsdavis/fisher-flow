@@ -59,6 +59,7 @@ class SFMModule(LightningModule):
         self.train_loss = MeanMetric()
         self.val_loss = MeanMetric()
         self.test_loss = MeanMetric()
+        self.sp_mse = MeanMetric()
         self.kl_eval = kl_eval
         self.kl_samples = kl_samples
 
@@ -71,6 +72,7 @@ class SFMModule(LightningModule):
         # by default lightning executes validation step sanity checks before training starts,
         # so it's worth to make sure validation metrics don't store results from these checks
         self.val_loss.reset()
+        self.sp_mse.reset()
 
     def model_step(
         self, x_1: torch.Tensor, signal: torch.Tensor | None = None,
@@ -138,7 +140,8 @@ class SFMModule(LightningModule):
             mx = torch.argmax(x_1, dim=-1)
             one_hot = F.one_hot(mx, num_classes=4)
             mse = eval_sp_mse(one_hot, pred)
-            self.log("val/sp-mse", mse, on_step=False, on_epoch=True, prog_bar=False)
+            self.sp_mse(mse)
+            self.log("val/sp-mse", self.sp_mse, on_step=False, on_epoch=True, prog_bar=True)
 
     def on_validation_epoch_end(self) -> None:
         """Lightning hook that is called when a validation epoch ends."""
