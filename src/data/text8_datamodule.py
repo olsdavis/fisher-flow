@@ -69,7 +69,7 @@ class Text8DataModule(LightningDataModule):
 
     def prepare_data(self):
         """Nothing to download."""
-        data_dir = "./data"
+        data_dir = self.hparams.data_dir
         meta_path = os.path.join(data_dir, 'meta.pkl')
         print(f"loading meta from {meta_path}")
         assert os.path.exists(meta_path)

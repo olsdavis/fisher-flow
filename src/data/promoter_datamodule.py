@@ -46,7 +46,7 @@ class PromoterDesignDataModule(LightningDataModule):
     def prepare_data(self):
         """Nothing to download."""
         self.data_train = PromoterDataset(split="train")
-        self.data_val = PromoterDataset(split="val")
+        self.data_val = PromoterDataset(split="valid")
         self.data_test = PromoterDataset(split="test")
 
     def setup(self, stage: str | None = None) -> None:
