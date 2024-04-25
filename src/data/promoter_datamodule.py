@@ -126,4 +126,9 @@ class PromoterDesignDataModule(LightningDataModule):
 
 
 if __name__ == "__main__":
-    _ = PromoterDesignDataModule().prepare_data()
+    mod = PromoterDesignDataModule()
+    mod.prepare_data()
+    mod.setup()
+    data_loader = mod.train_dataloader()
+    x = next(iter(data_loader))
+    print(print(x.sum(dim=-1)[0, :25]))

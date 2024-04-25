@@ -68,7 +68,6 @@ class SFMModule(LightningModule):
         """
         Perform a single model step on a batch of data.
         """
-        print(self.smoothing)
         return ot_train_step(
             self.manifold.smooth_labels(x_1, mx=self.smoothing) if self.smoothing else x_1,
             self.manifold,

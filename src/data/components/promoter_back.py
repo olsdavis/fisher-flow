@@ -87,7 +87,7 @@ class MemmapGenome(Genome):
 
     def _unpicklable_init(self):
         if not self.initialized:
-            print("Initializing Genome")
+            # print("Initializing Genome")
             self.genome = pyfaidx.Fasta(self.input_path)
             self.chrs = sorted(self.genome.keys())
             self.len_chrs = self._get_len_chrs()
@@ -137,7 +137,7 @@ class MemmapGenome(Genome):
                     self.sequence_data = np.memmap(
                         self.memmapfile, dtype="float32", mode="r", shape=self.sequence_data.shape
                     )
-            print("Finished Initializing Genome")
+            # print("Finished Initializing Genome")
             self.initialized = True
 
     def init(func):
