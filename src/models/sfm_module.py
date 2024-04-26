@@ -135,7 +135,7 @@ class SFMModule(LightningModule):
             pred = self.manifold.tangent_euler(
                 self.manifold.uniform_prior(*x_1.shape[:-1], 4).to(x_1.device),
                 eval_model,
-                steps=1,
+                steps=100,
             )
             mx = torch.argmax(x_1, dim=-1)
             one_hot = F.one_hot(mx, num_classes=4)
