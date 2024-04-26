@@ -23,6 +23,7 @@ trainer:
 
 model:
   compile: false
+  promoter_eval: true
   net:
     mode: sfm  # just ignores the custom stuff
 
@@ -30,5 +31,6 @@ logger:
   wandb:
     tags: ${tags}
     group: "promoter_design"
+    name: promoter_design_promdfm_B${data.batch_size}
   aim:
     experiment: "promoter_design"

@@ -13,7 +13,7 @@ from src.sfm import (
     manifold_from_name,
     ot_train_step,
 )
-from src.data.components.promoter_eval import eval_sp_mse, get_sei_profile
+from src.data.components.promoter_eval import SeiEval
 
 
 class SFMModule(LightningModule):
@@ -135,11 +135,11 @@ class SFMModule(LightningModule):
             pred = self.manifold.tangent_euler(
                 self.manifold.uniform_prior(*x_1.shape[:-1], 4).to(x_1.device),
                 eval_model,
-                steps=100,
+                steps=1,
             )
             mx = torch.argmax(x_1, dim=-1)
             one_hot = F.one_hot(mx, num_classes=4)
-            mse = eval_sp_mse(one_hot, pred)
+            mse = SeiEval().eval_sp_mse(one_hot, pred, batch_idx)
             self.sp_mse(mse)
             self.log("val/sp-mse", self.sp_mse, on_step=False, on_epoch=True, prog_bar=True)
 
@@ -165,12 +165,17 @@ class SFMModule(LightningModule):
 
     def on_test_epoch_end(self):
         """Evaluates KL if required."""
-        if not self.kl_eval:
-            return
-        # evaluate KL
-        real_probs = self.trainer.test_dataloaders.dataset.probs.to(self.device)
-        kl = estimate_categorical_kl(self.net, self.manifold, real_probs, self.kl_samples, batch=2048)
-        self.log("test/kl", kl, on_step=False, on_epoch=True, prog_bar=False)
+        if self.kl_eval:
+            # evaluate KL
+            real_probs = self.trainer.test_dataloaders.dataset.probs.to(self.device)
+            kl = estimate_categorical_kl(
+                self.net,
+                self.manifold,
+                real_probs,
+                self.kl_samples,
+                batch=self.hparams.get("kl_batch", 2048),
+            )
+            self.log("test/kl", kl, on_step=False, on_epoch=True, prog_bar=False)
 
     def setup(self, stage: str):
         """Lightning hook that is called at the beginning of fit (train + validate), validate,

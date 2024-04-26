@@ -111,7 +111,7 @@ class Manifold(ABC):
         t = torch.zeros((x.size(0), 1), device=x_0.device, dtype=x_0.dtype)
         for _ in range(steps):
             t += dt
-            x = self.exp_map(x, self.make_tangent(x, model(x, t)) * dt)
+            x = self.exp_map(x, self.make_tangent(x, model(x=x, t=t)) * dt)
         return x
 
     @torch.no_grad()
