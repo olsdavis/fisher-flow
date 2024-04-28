@@ -1,0 +1,42 @@
+# @package _global_
+
+# to execute this experiment run:
+# python train.py experiment=example
+
+defaults:
+  - override /data: retrobridge # points to a yaml file
+  - override /model: retrobridge_retrosyn # points to a yaml file
+  - override /callbacks: default
+  - override /trainer: default
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+
+# first tag is the data set, second tag is the model
+tags: ["retrosyn", "test_cpu"]
+
+seed: 12345
+
+trainer:
+  min_epochs: 1
+  max_epochs: 1 #1000
+  gradient_clip_val: 1.0
+  num_sanity_val_steps: 0
+
+model:
+  optimizer:
+    lr: 0.0001
+  net:
+  compile: false
+
+data:
+  batch_size: 512
+
+#TODO: add tags for wandb logger
+logger:
+  wandb:
+    tags: ${tags}
+    group: retrosyn
+    name: test_name
+  aim:
+    experiment: test_exp

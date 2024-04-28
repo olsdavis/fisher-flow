@@ -1,10 +1,10 @@
 # Simplex-Flows
 
-[TODO]
+TODO:
 
 ## Promoter and Enhancer DNA Experiment
 
-[TODO]
+TODO:
 
 ```py
 python xxx.py --arg1 --arg2
@@ -18,8 +18,17 @@ Test whether the data has been loaded correctly:
 python -m src.data.retrobridge_datamodule
 ```
 
-To run Simplex-Flows on this dataset:
+Test whether the model has been correctly coded up:
 
 ```py
-python -m xxx.xxx.xxx
+python -m src.models.retrobridge_module
+```
+
+
+To run Simplex-Flows on this dataset:
+
+TODO:
+
+```py
+python -m src.train experiment=retrobridge_retrosyn
 ```
