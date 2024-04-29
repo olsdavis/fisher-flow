@@ -118,22 +118,25 @@ class DNAModule(pl.LightningModule):
         self.test_loss(loss)
         self.log("test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True)
 
-    def on_test_epoch_end(self):
-        # evaluate KL
+    @torch.inference_mode()
+    def estimate_kl(self, real_probs, n_samples: int):
         with torch.inference_mode():
-            to_draw = self.kl_samples
+            to_draw = n_samples
             acc = torch.zeros((self.net.k, self.net.dim), device=self.device)
             concentration = torch.ones((self.net.k, self.net.dim), device=self.device)
             while to_draw > 0:
-                n = min(to_draw, 512)
+                n = min(to_draw, 2048)
                 x_0 = Dirichlet(concentration).sample((n,))
                 samples = self.dirichlet_flow_inference(x_0, None, self.net)[1]
                 acc += torch.nn.functional.one_hot(samples.argmax(dim=-1), self.net.dim).sum(dim=0)
                 to_draw -= n
         acc /= acc.sum(dim=-1, keepdim=True)
-        real_probs = self.trainer.test_dataloaders.dataset.probs.to(self.device)
+        real_probs = real_probs.to(self.device)
         kl = (acc * (acc.log() - real_probs.log())).sum(dim=-1).mean().item()
-        self.log("test/kl", kl, on_step=False, on_epoch=True, prog_bar=False)
+        return kl
+
+    def on_test_epoch_end(self):
+        self.log("test/kl", self.estimate_kl(self.trainer.test_dataloaders.dataset.probs.to(self.device), self.kl_samples), on_step=False, on_epoch=True, prog_bar=False)
 
     def general_step(self, batch, batch_idx=None):
         seq = batch
@@ -404,6 +407,7 @@ class DNAModule(pl.LightningModule):
 
     def on_validation_epoch_end(self):
         self.val_outputs = defaultdict(list)
+        # self.log("val/kl", self.estimate_kl(self.trainer.val_dataloaders.dataset.probs.to(self.device), self.kl_samples // 10), on_step=False, on_epoch=True, prog_bar=False)
 
     def on_train_start(self) -> None:
         self.val_loss.reset()
