@@ -145,6 +145,18 @@ class SFMModule(LightningModule):
 
     def on_validation_epoch_end(self) -> None:
         """Lightning hook that is called when a validation epoch ends."""
+        if self.kl_eval:
+            # evaluate KL
+            real_probs = self.trainer.val_dataloaders.dataset.probs.to(self.device)
+            kl = estimate_categorical_kl(
+                self.net,
+                self.manifold,
+                real_probs,
+                self.kl_samples // 10,
+                batch=self.hparams.get("kl_batch", 2048),
+                silent=True,
+            )
+            self.log("val/kl", kl, on_step=False, on_epoch=True, prog_bar=False)
 
     def test_step(self, x_1: torch.Tensor | list[torch.Tensor], batch_idx: int):
         """Perform a single test step on a batch of data from the test set.

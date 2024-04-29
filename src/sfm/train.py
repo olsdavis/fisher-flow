@@ -74,14 +74,16 @@ def cft_loss_function(
         - `model`: the model to apply;
         - `sampler` (optional): the sampler for the OT plan;
         - `signal` (optional): extra signal for some datasets.
-    
+
     Returns:
         The loss tensor, the model output, and the target vector.
     """
     if sampler:
         x_0, x_1 = sampler.sample_plan(x_0, x_1)
     x_t = m.geodesic_interpolant(x_0, x_1, t)
-    target = m.log_map(x_t, x_1) / (1.0 - t.unsqueeze(-1) + eps)
+    # target = m.log_map(x_t, x_1) / (1.0 - t.unsqueeze(-1) + eps)
+    target = m.log_map(x_0, x_1)
+    target = m.parallel_transport(x_0, x_t, target)
     if signal is not None:
         out = model(x_t, signal, t)
     else:

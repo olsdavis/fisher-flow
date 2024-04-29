@@ -50,7 +50,7 @@ def estimate_categorical_kl(
     """
     assert sampling_mode in ["sample", "max"], "not a valid sampling mode"
     # init acc
-    acc = torch.zeros_like(real_dist, device=real_dist.device)
+    acc = torch.zeros_like(real_dist, device=real_dist.device).float()
 
     model.eval()
     to_sample = [batch] * (n // batch)
@@ -63,16 +63,20 @@ def estimate_categorical_kl(
         x_1 = manifold.tangent_euler(x_0, model, inference_steps)
         x_1 = manifold.send_to(x_1, NSimplex)
         if sampling_mode == "sample":
-            dist = Dirichlet(x_1)
-            samples = dist.sample()
-            acc += samples.sum(dim=0)
+            # TODO: remove or fix for Categorical
+            raise NotImplementedError("Sampling from Dirichlet not implemented")
+            # dist = Dirichlet(x_1)
+            # samples = dist.sample()
+            # acc += samples.sum(dim=0)
         else:
             samples = nn.functional.one_hot(
                 x_1.argmax(dim=-1),
                 real_dist.size(-1),
-            )
+            ).float()
             acc += samples.sum(dim=0)
 
-    acc /= float(n)
-    ret = (acc * (acc.log() - real_dist.log())).sum().item()
+    acc /= acc.sum(dim=-1, keepdim=True)
+    if not silent:
+        print(acc)
+    ret = (acc * (acc.log() - real_dist.log())).sum(dim=-1).mean().item()
     return ret

@@ -594,7 +594,8 @@ class CNNModel(nn.Module):
             self.cls_embedder = nn.Embedding(num_embeddings=self.num_cls + 1, embedding_dim=self.hidden)
             self.cls_layers = nn.ModuleList([Dense(self.hidden, self.hidden) for _ in range(self.num_layers)])
 
-    def forward(self, seq, t, cls = None, return_embedding=False):
+    def forward(self, x, t, cls = None, return_embedding=False):
+        seq = x
         if self.clean_data:
             feat = self.linear(seq)
             feat = feat.permute(0, 2, 1)

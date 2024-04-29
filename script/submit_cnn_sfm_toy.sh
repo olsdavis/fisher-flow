@@ -8,4 +8,4 @@
 #SBATCH --gres=gpu:1
 echo "Here: dim = $1"
 conda activate sfm
-srun -u python -m src.train experiment=toy_dfm_sfm_cnn data.dim=$1 trainer=gpu trainer.max_epochs=1000 logger=wandb data.batch_size=1024
+srun -u python -m src.train experiment=toy_dfm_sfm_cnn data.dim=$1 trainer=gpu trainer.max_epochs=500 logger=wandb data.batch_size=512

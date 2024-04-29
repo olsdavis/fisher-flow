@@ -130,9 +130,9 @@ class DNAModule(pl.LightningModule):
                 samples = self.dirichlet_flow_inference(x_0, None, self.net)[1]
                 acc += torch.nn.functional.one_hot(samples.argmax(dim=-1), self.net.dim).sum(dim=0)
                 to_draw -= n
-        acc /= self.kl_samples
+        acc /= acc.sum(dim=-1, keepdim=True)
         real_probs = self.trainer.test_dataloaders.dataset.probs.to(self.device)
-        kl = (acc * (acc.log() - real_probs.log())).sum().item()
+        kl = (acc * (acc.log() - real_probs.log())).sum(dim=-1).mean().item()
         self.log("test/kl", kl, on_step=False, on_epoch=True, prog_bar=False)
 
     def general_step(self, batch, batch_idx=None):
