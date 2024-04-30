@@ -57,7 +57,7 @@ class SFMModule(LightningModule):
         else:
             self.net = net
         if ema:
-            self.ema = ExponentialMovingAverage(self.net, decay=ema_decay)
+            self.ema = ExponentialMovingAverage(self.net.parameters(), decay=ema_decay).to(self.device)
         else:
             self.ema = None
         # default manifold = sphere

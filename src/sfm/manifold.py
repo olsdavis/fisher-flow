@@ -533,6 +533,8 @@ class GeooptSphere(Manifold):
         return self.sphere.transp(p, q, v)
 
     def make_tangent(self, p: Tensor, v: Tensor) -> Tensor:
+        # TODO: add abs?
+        p = self.sphere.projx(p)
         return self.sphere.proju(p, v)
 
     def uniform_prior(self, n: int, k: int, d: int) -> Tensor:

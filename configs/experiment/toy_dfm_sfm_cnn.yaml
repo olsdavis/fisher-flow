@@ -19,7 +19,7 @@ seed: 12345
 trainer:
   min_epochs: 1
   max_epochs: 1000
-  gradient_clip_val: 0.64
+  gradient_clip_val: 1.0
 
 model:
   optimizer:
@@ -31,6 +31,7 @@ model:
   compile: false
   manifold: sphere
   kl_eval: true
+  ema: true
   # label_smoothing: 0.81
 
 data:

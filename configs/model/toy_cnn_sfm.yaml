@@ -7,13 +7,14 @@ optimizer:
   weight_decay: 0.0
 
 scheduler:
-  _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+  _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
   _partial_: true
-  # mode: min
-  # factor: 0.1
-  # patience: 10
-  T_max: 1000
-  eta_min: 0.00008
+  mode: min
+  factor: 0.1
+  patience: 10
+  # _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+  # T_max: 1000
+  # eta_min: 0.00008
 
 net:
   _target_: src.models.net.CNNModel
