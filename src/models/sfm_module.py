@@ -4,6 +4,7 @@ import torch
 from torch.nn import functional as F
 from lightning import LightningModule
 from torchmetrics import MeanMetric
+from torch_ema import ExponentialMovingAverage
 
 
 from src.sfm import (
@@ -32,6 +33,9 @@ class SFMModule(LightningModule):
         kl_eval: bool = False,
         kl_samples: int = 512_000,
         label_smoothing: float | None = None,
+        ema: bool = False,
+        ema_decay: float = 0.9,
+        tangent_euler: bool = True,
     ) -> None:
         """
         :param net: The model to train.
@@ -45,12 +49,17 @@ class SFMModule(LightningModule):
         self.save_hyperparameters(logger=False)
         # if basically zero or zero
         self.smoothing = label_smoothing if label_smoothing and label_smoothing > 1e-6 else None
+        self.tangent_euler = tangent_euler
         self.promoter_eval = promoter_eval
 
         if compile:
             self.net = torch.compile(net)
         else:
             self.net = net
+        if ema:
+            self.ema = ExponentialMovingAverage(self.net, decay=ema_decay)
+        else:
+            self.ema = None
         # default manifold = sphere
         self.manifold: Manifold = manifold_from_name(manifold)
         self.sampler: OTSampler = OTSampler(self.manifold, "exact")
@@ -89,7 +98,7 @@ class SFMModule(LightningModule):
         )[0]
 
     def training_step(
-        self, x_1: torch.Tensor | tuple[torch.Tensor, torch.Tensor], batch_idx: int,
+        self, x_1: torch.Tensor | list[torch.Tensor], batch_idx: int,
     ) -> torch.Tensor:
         """Perform a single training step on a batch of data from the training set.
 
@@ -136,6 +145,7 @@ class SFMModule(LightningModule):
                 self.manifold.uniform_prior(*x_1.shape[:-1], 4).to(x_1.device),
                 eval_model,
                 steps=100,
+                tangent=self.tangent_euler,
             )
             mx = torch.argmax(x_1, dim=-1)
             one_hot = F.one_hot(mx, num_classes=4)
@@ -155,6 +165,7 @@ class SFMModule(LightningModule):
                 self.kl_samples // 10,
                 batch=self.hparams.get("kl_batch", 2048),
                 silent=True,
+                tangent=self.tangent_euler,
             )
             self.log("val/kl", kl, on_step=False, on_epoch=True, prog_bar=False)
 
@@ -186,8 +197,14 @@ class SFMModule(LightningModule):
                 real_probs,
                 self.kl_samples,
                 batch=self.hparams.get("kl_batch", 2048),
+                tangent=self.tangent_euler,
             )
             self.log("test/kl", kl, on_step=False, on_epoch=True, prog_bar=False)
+
+    def optimizer_step(self, *args, **kwargs):
+        super().optimizer_step(*args, **kwargs)
+        if self.ema is not None:
+            self.ema.update(self.net.parameters())
 
     def setup(self, stage: str):
         """Lightning hook that is called at the beginning of fit (train + validate), validate,

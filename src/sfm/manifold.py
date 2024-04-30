@@ -9,6 +9,7 @@ import torch
 from torch.distributions import Dirichlet
 from torch import Tensor, nn
 import ot
+from geoopt import Sphere as GSphere
 from einops import rearrange
 
 
@@ -101,17 +102,29 @@ class Manifold(ABC):
         x_0: Tensor,
         model: nn.Module,
         steps: int,
+        tangent: bool = True,
     ) -> Tensor:
         """
         Applies Euler integration on the manifold for the field defined
         by `model`.
+
+        Parameters:
+            - `x_0`: the starting point;
+            - `model`: the field;
+            - `steps`: the number of steps;
+            - `tangent`: if `True`, performs tangent Euler integration;
+                otherwise performs classical Euler integration.
         """
         dt = torch.tensor(1.0 / steps, device=x_0.device)
         x = x_0
         t = torch.zeros((x.size(0), 1), device=x_0.device, dtype=x_0.dtype)
         for _ in range(steps):
+            if tangent:
+                x = self.exp_map(x, self.make_tangent(x, model(x=x, t=t)) * dt)
+            else:
+                x = x + self.make_tangent(x, model(x=x, t=t)) * dt
+            x = self.project(x)
             t += dt
-            x = self.exp_map(x, self.make_tangent(x, model(x=x, t=t)) * dt)
         return x
 
     @torch.no_grad()
@@ -227,6 +240,12 @@ class Manifold(ABC):
         at point `x`.
         """
 
+    @abstractmethod
+    def project(self, x: Tensor) -> Tensor:
+        """
+        Projects the points `x` to the manifold.
+        """
+
 
 class NSimplex(Manifold):
     """
@@ -338,6 +357,12 @@ class NSimplex(Manifold):
         See `Manifold.all_belong_tangent`.
         """
         return torch.allclose(v.sum(dim=-1), torch.tensor(0.0))
+
+    def project(self, x: Tensor) -> Tensor:
+        """
+        See `Manifold.project`.
+        """
+        return x / x.sum(dim=-1, keepdim=True)
 
 
 class NSphere(Manifold):
@@ -480,13 +505,68 @@ class NSphere(Manifold):
         """
         return torch.allclose(fast_dot(x, v), torch.tensor(0.0), atol=1e-5)
 
+    def project(self, x: Tensor) -> Tensor:
+        """
+        See `Manifold.project`.
+        """
+        return x / x.norm(dim=-1, keepdim=True)
+
+
+class GeooptSphere(Manifold):
+    """Wrapper for Geoopt Sphere."""
+    def __init__(self):
+        self.sphere = GSphere()
+
+    def exp_map(self, p: Tensor, v: Tensor) -> Tensor:
+        return self.sphere.expmap(p, v)
+
+    def log_map(self, p: Tensor, q: Tensor) -> Tensor:
+        return self.sphere.logmap(p, q)
+
+    def geodesic_distance(self, p: Tensor, q: Tensor) -> Tensor:
+        return self.sphere.dist(p, q).sum(dim=1)
+
+    def metric(self, x: Tensor, u: Tensor, v: Tensor) -> Tensor:
+        return self.sphere.inner(x, u, v)
+
+    def parallel_transport(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
+        return self.sphere.transp(p, q, v)
+
+    def make_tangent(self, p: Tensor, v: Tensor) -> Tensor:
+        return self.sphere.proju(p, v)
+
+    def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
+        return self.sphere.random_uniform((n, k, d)).abs()
+
+    def smooth_labels(self, labels: Tensor, mx: float = 0.98) -> Tensor:
+        return NSimplex().send_to(NSimplex().smooth_labels(labels, mx), NSphere)
+
+    def send_to(self, x: Tensor, m: type[Manifold]) -> Tensor:
+        if m == NSphere:
+            return x
+        elif m == NSimplex:
+            return x.square()
+        raise NotImplementedError(f"unimplemented for {m}")
+
+    def all_belong(self, x: Tensor) -> bool:
+        return torch.allclose(x.norm(dim=-1), torch.tensor(1.0))
+
+    def all_belong_tangent(self, x: Tensor, v: Tensor) -> bool:
+        return torch.allclose(fast_dot(x, v), torch.tensor(0.0), atol=1e-5)
+
+    def project(self, x: Tensor) -> Tensor:
+        """
+        See `Manifold.project`.
+        """
+        return self.sphere.projx(x)
+
 
 def manifold_from_name(name: str) -> Manifold:
     """
     Returns the manifold corresponding to `name`.
     """
     if name == "sphere":
-        return NSphere()
+        return GeooptSphere()
     elif name == "simplex":
         return NSimplex()
     raise ValueError(f"Unknown manifold: {name}")

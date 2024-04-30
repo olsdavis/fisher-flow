@@ -27,6 +27,7 @@ def estimate_categorical_kl(
     inference_steps: int = 100,
     sampling_mode: str = "max",
     silent: bool = False,
+    tangent: bool = True,
 ) -> float:
     """
     Estimates the categorical KL divergence between points produced by the
@@ -60,7 +61,7 @@ def estimate_categorical_kl(
         x_0 = manifold.uniform_prior(
             draw, real_dist.size(0), real_dist.size(1),
         ).to(real_dist.device)
-        x_1 = manifold.tangent_euler(x_0, model, inference_steps)
+        x_1 = manifold.tangent_euler(x_0, model, inference_steps, tangent=tangent)
         x_1 = manifold.send_to(x_1, NSimplex)
         if sampling_mode == "sample":
             # TODO: remove or fix for Categorical

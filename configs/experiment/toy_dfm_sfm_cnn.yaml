@@ -31,6 +31,7 @@ model:
   compile: false
   manifold: sphere
   kl_eval: true
+  # label_smoothing: 0.81
 
 data:
   batch_size: 512

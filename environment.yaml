@@ -36,6 +36,8 @@ dependencies:
   - pip:
     - torch==2.1.0
     - POT==0.9.3
+    - geoopt==0.5.0
+    - torch-ema==0.3
     - dirichlet==0.9
     - einops==0.7.0
     - wandb==0.16.5

@@ -1,4 +1,5 @@
 """Utils for the entire project."""
+from .solvers import projx_integrator_return_last
 from .maths import (
     fast_dot,
     safe_arccos,
