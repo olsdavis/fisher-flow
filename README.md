@@ -38,5 +38,5 @@ HYDRA_FULL_ERROR=1 python -m src.train experiment=retrobridge_retrosyn
 ## Text8
 
 ```py
-
+python -m src.train experiment=text8_sfm_bmlp
 ```
