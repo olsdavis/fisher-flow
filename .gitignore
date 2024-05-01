@@ -9,3 +9,4 @@ logs/
 *.csv
 *.pt
 pytabix_fix/
+copy2server.sh

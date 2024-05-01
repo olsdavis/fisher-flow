@@ -4,7 +4,7 @@ from tqdm import tqdm
 
 import torch
 import torch.nn.functional as F
-from lightning import LightningModule
+from lightning import LightningModule, LightningDataModule
 from torchmetrics import MeanMetric
 from torch_geometric.data import Batch
 
@@ -14,6 +14,7 @@ from src.experiments.retrosynthesis import ExtraFeatures, DummyExtraFeatures, Ex
 from src.markov_bridge import PredefinedNoiseScheduleDiscrete, InterpolationTransition, sample_discrete_features, reverse_tensor
 from src.experiments.retrosynthesis import TrainLossDiscrete, TrainLossVLB
 from src.data import PlaceHolder, to_dense, create_pred_reactant_molecules, create_true_reactant_molecules, create_input_product_molecules
+from src.data import retrobridge_utils, RetroBridgeDatasetInfos
 
 """
 TODO: class and methods
@@ -25,7 +26,8 @@ class RetroBridgeModule(LightningModule):
     """
     def __init__(
         self,
-        net: torch.nn.Module,
+        datamodule: LightningDataModule,
+        model: torch.nn.Module,
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler,
         compile: bool = False,
@@ -52,18 +54,19 @@ class RetroBridgeModule(LightningModule):
         chains_to_save: int = 5,
         fix_product_nodes: bool = True,
         lambda_train: List[int] = [5, 0],
+        net: Any = None, # TODO: why is this param being added to the yaml config?
     ) -> None:
         """
-        :param net: The model to train.
+        :param model: The model to train.
         :param optimizer: The optimizer to use for training.
         :param scheduler: The learning rate scheduler to use for training.
         """
         super().__init__()
 
         if compile:
-            self.net = torch.compile(net)
+            self.model = torch.compile(model)
         else:
-            self.net = net
+            self.model = model
 
         # TODO: check if these are needed        
         # for averaging loss across batches
@@ -91,26 +94,33 @@ class RetroBridgeModule(LightningModule):
         self.Xdim_output = output_dims['X']
         self.Edim_output = output_dims['E']
         self.ydim_output = output_dims['y']
-        # self.trainer.train_dataloaders.dataset -- > datamodule
-        self.dataset_infos = self.trainer.train_dataloaders.dataset_infos
-        self.train_metrics = TrainMolecularMetricsDiscrete(self.dataset_infos)
-        self.sampling_metrics = SamplingMolecularMetrics(
-            self.dataset_infos, self.trainer.train_dataloaders.dataset.train_smiles)
-        self.train_loss = TrainLossDiscrete(lambda_train) if loss_type != 'vlb' else TrainLossVLB(lambda_train)
-        self.val_loss = TrainLossDiscrete(lambda_train) if loss_type != 'vlb' else TrainLossVLB(lambda_train)
 
-        self.visualization_tools = MolecularVisualization(self.dataset_infos)
+        self.dataset_infos = RetroBridgeDatasetInfos(datamodule)
         self.extra_features = (
             ExtraFeatures(extra_features, dataset_info=self.dataset_infos)
             if extra_features is not None
             else DummyExtraFeatures()
         )
-        
         self.domain_features = (
             ExtraMolecularFeatures(dataset_infos=self.dataset_infos)
             if extra_molecular_features
             else DummyExtraFeatures()
         )
+        self.dataset_infos.compute_input_output_dims(
+            datamodule=datamodule,
+            extra_features=self.extra_features,
+            domain_features=self.domain_features,
+            use_context=use_context,
+        )
+
+        self.train_metrics = TrainMolecularMetricsDiscrete(self.dataset_infos)
+        self.sampling_metrics = SamplingMolecularMetrics(
+            self.dataset_infos, datamodule.train_smiles)
+        self.train_loss = TrainLossDiscrete(lambda_train) if loss_type != 'vlb' else TrainLossVLB(lambda_train)
+        self.val_loss = TrainLossDiscrete(lambda_train) if loss_type != 'vlb' else TrainLossVLB(lambda_train)
+
+        self.visualization_tools = MolecularVisualization(self.dataset_infos)
+
         self.use_context = use_context
     
         self.nodes_dist = self.dataset_infos.nodes_dist
@@ -153,11 +163,11 @@ class RetroBridgeModule(LightningModule):
         self.loss_type = loss_type
 
     def forward(self, noisy_data: dict, extra_data: PlaceHolder, node_mask: torch.Tensor) -> torch.Tensor:
-        """Perform a forward pass through the model `self.net`."""
+        """Perform a forward pass through the model `self.model`."""
         X = torch.cat((noisy_data['X_t'], extra_data.X), dim=2).float()
         E = torch.cat((noisy_data['E_t'], extra_data.E), dim=3).float()
         y = torch.hstack((noisy_data['y_t'], extra_data.y)).float()
-        return self.net(X, E, y, node_mask)
+        return self.model(X, E, y, node_mask)
 
     def on_train_start(self):
         """Lightning hook that is called when training begins."""
@@ -292,10 +302,10 @@ class RetroBridgeModule(LightningModule):
 
     def process_and_forward(self, data):
         # Getting graphs of reactants (target) and product (context)
-        reactants, r_node_mask = utils.to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
+        reactants, r_node_mask = retrobridge_utils.to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
         reactants = reactants.mask(r_node_mask)
 
-        product, p_node_mask = utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
+        product, p_node_mask = retrobridge_utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
         product = product.mask(p_node_mask)
 
         assert torch.allclose(r_node_mask, p_node_mask)
@@ -915,7 +925,7 @@ class RetroBridgeModule(LightningModule):
         :param stage: Either `"fit"`, `"validate"`, `"test"`, or `"predict"`.
         """
         if self.hparams.compile and stage == "fit":
-            self.net = torch.compile(self.net)
+            self.model = torch.compile(self.model)
 
     def configure_optimizers(self) -> dict[str, Any]:
         """Choose what optimizers and learning-rate schedulers to use in your optimization.

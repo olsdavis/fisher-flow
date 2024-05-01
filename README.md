@@ -25,10 +25,18 @@ python -m src.models.retrobridge_module
 ```
 
 
-To run Simplex-Flows on this dataset:
+To run RetroBridge on this dataset:
 
 TODO:
 
 ```py
-python -m src.train experiment=retrobridge_retrosyn
+HYDRA_FULL_ERROR=1 python -m src.train experiment=retrobridge_retrosyn
+```
+
+
+
+## Text8
+
+```py
+
 ```

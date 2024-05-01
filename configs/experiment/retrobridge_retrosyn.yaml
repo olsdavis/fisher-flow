@@ -6,7 +6,7 @@
 defaults:
   - override /data: retrobridge # points to a yaml file
   - override /model: retrobridge_retrosyn # points to a yaml file
-  - override /callbacks: default
+  - override /callbacks: retrobridge
   - override /trainer: default
 
 # all parameters below will be merged with parameters from default configurations set above
@@ -19,9 +19,11 @@ seed: 12345
 
 trainer:
   min_epochs: 1
-  max_epochs: 1 #1000
+  max_epochs: 1000
   gradient_clip_val: 1.0
   num_sanity_val_steps: 0
+  accelerator: 'gpu'
+  devices: [1]
 
 model:
   optimizer:
@@ -30,7 +32,7 @@ model:
   compile: false
 
 data:
-  batch_size: 512
+  batch_size: 64
 
 #TODO: add tags for wandb logger
 logger:

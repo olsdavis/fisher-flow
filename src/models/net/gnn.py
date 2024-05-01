@@ -12,6 +12,18 @@ from src.data.retrobridge_utils import PlaceHolder
 from src.markov_bridge.diffusion_utils import assert_correctly_masked
 from src.models.net.layers import Xtoy, Etoy, masked_softmax
 
+def str_to_activation(name: str) -> nn.Module:
+    """
+    Returns the activation function associated to the name `name`.
+    """
+    acts = {
+        "relu": nn.ReLU(),
+        "lrelu": nn.LeakyReLU(0.01),
+        "gelu": nn.GELU(),
+        "elu": nn.ELU(),
+        "swish": nn.SiLU(),
+    }
+    return acts[name]
 
 class XEyTransformerLayer(nn.Module):
     """ Transformer that updates node, edge and global features
@@ -236,14 +248,20 @@ class GraphTransformer(nn.Module):
         self.out_dim_y = output_dims['y']
         self.addition = addition
 
-        self.mlp_in_X = nn.Sequential(nn.Linear(input_dims['X'], hidden_mlp_dims['X']), act_fn_in,
-                                      nn.Linear(hidden_mlp_dims['X'], hidden_dims['dx']), act_fn_in)
+        self.act_fn_in = str_to_activation(act_fn_in)
+        self.act_fn_out = str_to_activation(act_fn_out)
 
-        self.mlp_in_E = nn.Sequential(nn.Linear(input_dims['E'], hidden_mlp_dims['E']), act_fn_in,
-                                      nn.Linear(hidden_mlp_dims['E'], hidden_dims['de']), act_fn_in)
+        self.mlp_in_X = nn.Sequential(
+            nn.Linear(input_dims['X'], hidden_mlp_dims['X']), self.act_fn_in,
+            nn.Linear(hidden_mlp_dims['X'], hidden_dims['dx']), self.act_fn_in)
+        
+        self.mlp_in_E = nn.Sequential(
+            nn.Linear(input_dims['E'], hidden_mlp_dims['E']), self.act_fn_in,
+            nn.Linear(hidden_mlp_dims['E'], hidden_dims['de']), self.act_fn_in)
 
-        self.mlp_in_y = nn.Sequential(nn.Linear(input_dims['y'], hidden_mlp_dims['y']), act_fn_in,
-                                      nn.Linear(hidden_mlp_dims['y'], hidden_dims['dy']), act_fn_in)
+        self.mlp_in_y = nn.Sequential(
+            nn.Linear(input_dims['y'], hidden_mlp_dims['y']), self.act_fn_in,
+            nn.Linear(hidden_mlp_dims['y'], hidden_dims['dy']), self.act_fn_in)
 
         self.tf_layers = nn.ModuleList([XEyTransformerLayer(dx=hidden_dims['dx'],
                                                             de=hidden_dims['de'],
@@ -253,14 +271,17 @@ class GraphTransformer(nn.Module):
                                                             dim_ffE=hidden_dims['dim_ffE'])
                                         for i in range(n_layers)])
 
-        self.mlp_out_X = nn.Sequential(nn.Linear(hidden_dims['dx'], hidden_mlp_dims['X']), act_fn_out,
-                                       nn.Linear(hidden_mlp_dims['X'], output_dims['X']))
+        self.mlp_out_X = nn.Sequential(
+            nn.Linear(hidden_dims['dx'], hidden_mlp_dims['X']), self.act_fn_out,
+            nn.Linear(hidden_mlp_dims['X'], output_dims['X']))
 
-        self.mlp_out_E = nn.Sequential(nn.Linear(hidden_dims['de'], hidden_mlp_dims['E']), act_fn_out,
-                                       nn.Linear(hidden_mlp_dims['E'], output_dims['E']))
+        self.mlp_out_E = nn.Sequential(
+            nn.Linear(hidden_dims['de'], hidden_mlp_dims['E']), self.act_fn_out,
+            nn.Linear(hidden_mlp_dims['E'], output_dims['E']))
 
-        self.mlp_out_y = nn.Sequential(nn.Linear(hidden_dims['dy'], hidden_mlp_dims['y']), act_fn_out,
-                                       nn.Linear(hidden_mlp_dims['y'], output_dims['y']))
+        self.mlp_out_y = nn.Sequential(
+            nn.Linear(hidden_dims['dy'], hidden_mlp_dims['y']), self.act_fn_out,
+            nn.Linear(hidden_mlp_dims['y'], output_dims['y']))
 
     def forward(self, X, E, y, node_mask):
         bs, n = X.shape[0], X.shape[1]

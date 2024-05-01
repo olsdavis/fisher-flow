@@ -41,7 +41,6 @@ class PredefinedNoiseSchedule(torch.nn.Module):
         return self.gamma[t_int]
 
 
-
 class PredefinedNoiseScheduleDiscrete(torch.nn.Module):
     """
     Predefined noise schedule. Essentially creates a lookup array for predefined (non-learned) noise schedules.
@@ -69,9 +68,6 @@ class PredefinedNoiseScheduleDiscrete(torch.nn.Module):
         log_alpha = torch.log(self.alphas)
         log_alpha_bar = torch.cumsum(log_alpha, dim=0)
         self.alphas_bar = torch.exp(log_alpha_bar)
-        if torch.cuda.is_available():
-            self.alphas_bar = self.alphas_bar.to('cuda:0')
-
         # print(f"[Noise schedule: {noise_schedule}] alpha_bar:", self.alphas_bar)
 
     def forward(self, t_normalized=None, t_int=None):
@@ -81,6 +77,10 @@ class PredefinedNoiseScheduleDiscrete(torch.nn.Module):
         return self.betas[t_int.long()]
 
     def get_alpha_bar(self, t_normalized=None, t_int=None):
+        # Get the device from the input tensor t_int
+        device = t_normalized.device
+        self.alphas_bar = self.alphas_bar.to(device)
+
         assert int(t_normalized is None) + int(t_int is None) == 1
         if t_int is None:
             t_int = torch.round(t_normalized * self.timesteps)
