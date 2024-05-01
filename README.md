@@ -30,7 +30,7 @@ To run RetroBridge on this dataset:
 TODO:
 
 ```py
-HYDRA_FULL_ERROR=1 python -m src.train experiment=retrobridge_retrosyn
+HYDRA_FULL_ERROR=1 python -m src.train experiment=retrobridge_retrosyn logger=wandb
 ```
 
 
@@ -38,5 +38,5 @@ HYDRA_FULL_ERROR=1 python -m src.train experiment=retrobridge_retrosyn
 ## Text8
 
 ```py
-python -m src.train experiment=text8_sfm_bmlp
+python -m src.train experiment=text8_sfm_bmlp logger=wandb
 ```

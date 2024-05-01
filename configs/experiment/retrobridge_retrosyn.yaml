@@ -13,7 +13,7 @@ defaults:
 # this allows you to overwrite only specified parameters
 
 # first tag is the data set, second tag is the model
-tags: ["retrosyn", "test_cpu"]
+tags: ["retrosyn", "retro_bridge"]
 
 seed: 12345
 
@@ -34,11 +34,10 @@ model:
 data:
   batch_size: 64
 
-#TODO: add tags for wandb logger
 logger:
   wandb:
     tags: ${tags}
     group: retrosyn
-    name: test_name
+    name: retrobridge_retro_syn_s12345
   aim:
     experiment: test_exp
