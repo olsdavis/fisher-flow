@@ -462,7 +462,7 @@ class BestMLP(nn.Module):
         emb = self.time_embedding(t)
         for layer in self.net:
             x = layer(x, emb)
-        x = x.reshape(final_shape)
+        x = x.view(final_shape)
         return x
 
 

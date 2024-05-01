@@ -28,6 +28,5 @@ from .sampler import (
 )
 from .train import (
     cft_loss_function,
-    dfm_train_step,
     ot_train_step,
 )

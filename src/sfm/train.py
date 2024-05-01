@@ -1,9 +1,7 @@
 """Loss utils."""
 import torch
-from torch import vmap
+from torch import Tensor, nn, vmap
 from torch.func import jvp
-from torch.distributions.dirichlet import Dirichlet
-from torch import Tensor, nn
 from src.sfm import Manifold, OTSampler
 
 
@@ -23,26 +21,6 @@ def geodesic(manifold, start_point, end_point):
         return points_at_time_t
 
     return path
-
-
-def dfm_train_step(
-    x_1: Tensor,
-    model: nn.Module,
-) -> Tensor:
-    """
-    Returns the loss for a Dirichlet Flow Matching training step.
-
-    Parameters:
-        - `x_1`: the data tensor, must be one-hot encoding;
-        - `model`: the model to train.
-    """
-    b = x_1.size(0)
-    t = torch.rand((b, 1), device=x_1.device)
-    alpha_t = torch.ones_like(x_1) + x_1 * t
-    # iterate over
-    x_t = Dirichlet(alpha_t).sample().to(x_1.device)
-    p_hat = model(x_t, t)
-    return nn.functional.cross_entropy(p_hat, x_1)
 
 
 def ot_train_step(
@@ -86,7 +64,6 @@ def cft_loss_function(
     model: nn.Module,
     sampler: OTSampler | None,
     signal: Tensor | None = None,
-    eps: float = 1e-8,
     closed_form_drv: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor]:
     """
@@ -115,12 +92,13 @@ def cft_loss_function(
         target = m.log_map(x_0, x_1)
         target = m.parallel_transport(x_0, x_t, target)
     else:
-        # https://github.com/facebookresearch/riemannian-fm/blob/main/manifm/model_pl.py
-        def cond_u(x0, x1, t):
-            path = geodesic(m.sphere, x0, x1)
-            x_t, u_t = jvp(path, (t,), (torch.ones_like(t).to(t),))
-            return x_t, u_t
-        x_t, target = vmap(cond_u)(x_0, x_1, t)
+        with torch.inference_mode(False):
+            # https://github.com/facebookresearch/riemannian-fm/blob/main/manifm/model_pl.py
+            def cond_u(x0, x1, t):
+                path = geodesic(m.sphere, x0, x1)
+                x_t, u_t = jvp(path, (t,), (torch.ones_like(t).to(t),))
+                return x_t, u_t
+            x_t, target = vmap(cond_u)(x_0, x_1, t)
         x_t = x_t.squeeze()
         target = target.squeeze()
     # now calculate diffs

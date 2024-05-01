@@ -149,7 +149,7 @@ class SFMModule(LightningModule):
             )
             mx = torch.argmax(x_1, dim=-1)
             one_hot = F.one_hot(mx, num_classes=4)
-            mse = SeiEval().eval_sp_mse(one_hot, pred, batch_idx)
+            mse = SeiEval().eval_sp_mse(pred, one_hot, batch_idx)
             self.sp_mse(mse)
             self.log("val/sp-mse", self.sp_mse, on_step=False, on_epoch=True, prog_bar=True)
 
