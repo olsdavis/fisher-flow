@@ -36,6 +36,7 @@ data:
 
 logger:
   wandb:
+    project: sfm
     tags: ${tags}
     group: retrosyn
     name: retrobridge_retro_syn_s12345
