@@ -61,6 +61,8 @@ class Text8DataModule(LightningDataModule):
         # corresponds to window size
         self.k = k
 
+        self.data_dir = data_dir
+
         self.data_train: Dataset | None = None
         self.data_val: Dataset | None = None
         self.data_test: Dataset | None = None
@@ -69,7 +71,7 @@ class Text8DataModule(LightningDataModule):
 
     def prepare_data(self):
         """Nothing to download."""
-        data_dir = self.hparams.data_dir
+        data_dir = self.data_dir
         meta_path = os.path.join(data_dir, 'meta.pkl')
         print(f"loading meta from {meta_path}")
         assert os.path.exists(meta_path)
@@ -103,9 +105,13 @@ class Text8DataModule(LightningDataModule):
         data_val_base = np.fromfile(os.path.join(data_dir, 'val.bin'), dtype=np.uint16)
         # build dataset
         data_train = build_blocks(data_train_base, self.k)[:self.hparams.train_val_test_split[0]]
-        data_val = build_blocks(data_val_base, self.k)[:self.hparams.train_val_test_split[2]]
+        val_block = build_blocks(data_val_base, self.k)
+        assert len(val_block) > self.hparams.train_val_test_split[1] + self.hparams.train_val_test_split[2]
+        data_val = val_block[:self.hparams.train_val_test_split[2]]
+        data_test = val_block[self.hparams.train_val_test_split[2]:self.hparams.train_val_test_split[1] + self.hparams.train_val_test_split[2]]
         self.data_train = Text8Dataset(torch.stack(data_train), self.meta_vocab_size, self.k, "train")
         self.data_val = Text8Dataset(torch.stack(data_val), self.meta_vocab_size, self.k, "val")
+        self.data_test = Text8Dataset(torch.stack(data_test), self.meta_vocab_size, self.k, "test")
 
     def setup(self, stage: str | None = None) -> None:
         """
