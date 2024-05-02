@@ -32,7 +32,7 @@ model:
   manifold: sphere
   kl_eval: true
   # ema: true
-  # label_smoothing: 0.81
+  label_smoothing: 0.81
 
 data:
   batch_size: 512
