@@ -85,8 +85,6 @@ def cft_loss_function(
     """
     if sampler:
         x_0, x_1 = sampler.sample_plan(x_0, x_1)
-    # TODO: Check this
-    # print(out.norm(dim=-1).sum(dim=1).max(), target.norm(dim=-1).sum(dim=1).min())
     if closed_form_drv:
         x_t = m.geodesic_interpolant(x_0, x_1, t)
         target = m.log_map(x_0, x_1)

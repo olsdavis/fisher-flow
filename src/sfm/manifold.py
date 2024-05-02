@@ -532,9 +532,14 @@ class GeooptSphere(Manifold):
     def parallel_transport(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
         return self.sphere.transp(p, q, v)
 
+    def parallel_transport_alt(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
+        denom = 1 + self.metric(p, p, q)
+        res = v - self.metric(p, q, v) / denom * (p + q)
+        cond = denom.gt(1e-3)
+        return torch.where(cond, res, -v)
+
     def make_tangent(self, p: Tensor, v: Tensor) -> Tensor:
-        # TODO: add abs?
-        p = self.sphere.projx(p)
+        p = self.project(p)
         return self.sphere.proju(p, v)
 
     def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
@@ -560,7 +565,7 @@ class GeooptSphere(Manifold):
         """
         See `Manifold.project`.
         """
-        return self.sphere.projx(x)
+        return self.sphere.projx(x).abs()
 
 
 def manifold_from_name(name: str) -> Manifold:

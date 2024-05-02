@@ -31,7 +31,7 @@ model:
   compile: false
   manifold: sphere
   kl_eval: true
-  ema: true
+  # ema: true
   # label_smoothing: 0.81
 
 data:
