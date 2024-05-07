@@ -3,8 +3,9 @@ from typing import Any
 import torch
 from torch.nn import functional as F
 from lightning import LightningModule
+from lightning.pytorch.utilities import grad_norm
 from torch.optim.optimizer import Optimizer
-from torchmetrics import MeanMetric
+from torchmetrics import MeanMetric, MinMetric, MaxMetric
 from torch_ema import ExponentialMovingAverage
 
 
@@ -38,6 +39,7 @@ class SFMModule(LightningModule):
         ema: bool = False,
         ema_decay: float = 0.99,
         tangent_euler: bool = True,
+        debug_grads: bool = False,
     ) -> None:
         """
         :param net: The model to train.
@@ -65,8 +67,12 @@ class SFMModule(LightningModule):
         self.val_loss = MeanMetric()
         self.test_loss = MeanMetric()
         self.sp_mse = MeanMetric()
+        self.min_grad = MinMetric()
+        self.max_grad = MaxMetric()
+        self.mean_grad = MeanMetric()
         self.kl_eval = kl_eval
         self.kl_samples = kl_samples
+        self.debug_grads = debug_grads
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Perform a forward pass through the model `self.net`."""
@@ -186,9 +192,14 @@ class SFMModule(LightningModule):
         self.log("test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True)
 
     def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
-        # from lightning.pytorch.utilities import grad_norm
-        # print(grad_norm(self.net, norm_type=2))
-        pass
+        if self.debug_grads:
+            norms = grad_norm(self.net, norm_type=2).values()
+            self.min_grad(min(norms))
+            self.max_grad(max(norms))
+            self.mean_grad(sum(norms) / len(norms))
+            self.log("train/min_grad", self.min_grad, on_step=False, on_epoch=True, prog_bar=True)
+            self.log("train/max_grad", self.max_grad, on_step=False, on_epoch=True, prog_bar=True)
+            self.log("train/mean_grad", self.mean_grad, on_step=False, on_epoch=True, prog_bar=True)
 
     def on_test_epoch_end(self):
         """Evaluates KL if required."""
