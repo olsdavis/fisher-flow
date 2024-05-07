@@ -5,7 +5,7 @@
 
 defaults:
   - override /data: promoter_design
-  - override /model: bsignal_mlp
+  - override /model: sfm_tmlp_signal
   - override /callbacks: default
   - override /trainer: default
 
@@ -35,6 +35,6 @@ logger:
   wandb:
     tags: ${tags}
     group: "promoter_design"
-    name: promoter_design_sfm_bmlp_B${data.batch_size}
+    name: promoter_design_sfm_tmlp
   aim:
     experiment: "promoter_design"

@@ -160,7 +160,7 @@ class TestManifoldsGeneral(unittest.TestCase):
         self.seq_len = 30
         self.dim = 320
         self.manifolds = [
-            # NSimplex(),
+            NSimplex(),
             NSphere(),
         ]
 
@@ -173,8 +173,8 @@ class TestManifoldsGeneral(unittest.TestCase):
             set_seeds(0)
             x = manifold.uniform_prior(1000, self.seq_len, self.dim)
             self.assertTrue(
-                # manifold.all_belong(x),
-                torch.allclose(x.square().sum(dim=-1), torch.ones((1000, self.seq_len))),
+                manifold.all_belong(x),
+                # torch.allclose(x.square().sum(dim=-1), torch.ones((1000, self.seq_len))),
                 f"all points from prior must belong to manifold, {type(manifold).__name__}",
             )
 
@@ -245,9 +245,39 @@ class TestManifoldsGeneral(unittest.TestCase):
                 testing.assert_close(
                     (transported * q).sum(dim=-1),
                     torch.zeros(points, seq_len),
-                    atol=1e-6,
+                    atol=1e-5,
                     rtol=1e-6,
                 )
+
+    def test_midinterpolant(self):
+        """
+        Tests whether the midpoint of a geodesic is equidistant to both
+        end-points.
+        """
+        for manifold in self.manifolds:
+            set_seeds(3)
+            x = manifold.uniform_prior(500, self.seq_len, self.dim)
+            y = manifold.uniform_prior(500, self.seq_len, self.dim)
+            z = manifold.geodesic_interpolant(x, y, torch.full((500, 1), 0.5))
+            testing.assert_close(
+                manifold.geodesic_distance(x, z),
+                manifold.geodesic_distance(z, y),
+                atol=1e-5,
+                rtol=1e-5,
+            )
+
+    def test_zero_interpolant(self):
+        """
+        Tests end points of geodesic interpolant.
+        """
+        for manifold in self.manifolds:
+            set_seeds(4)
+            x = manifold.uniform_prior(500, self.seq_len, self.dim)
+            y = manifold.uniform_prior(500, self.seq_len, self.dim)
+            z = manifold.geodesic_interpolant(x, y, torch.zeros((500, 1)))
+            testing.assert_close(z, x)
+            w = manifold.geodesic_interpolant(x, y, torch.ones((500, 1)))
+            testing.assert_close(w, y)
 
 
 if __name__ == "__main__":

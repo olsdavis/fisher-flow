@@ -50,6 +50,7 @@ dependencies:
     - pyranges==0.0.129
     - cooler==0.9.3
     - cooltools==0.7.0
+    - torchdiffeq==0.2.3
 
 
   # --------- loggers --------- #

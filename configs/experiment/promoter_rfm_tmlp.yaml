@@ -5,14 +5,14 @@
 
 defaults:
   - override /data: promoter_design
-  - override /model: bsignal_mlp
+  - override /model: rfm_tmlp_signal
   - override /callbacks: default
   - override /trainer: default
 
 # all parameters below will be merged with parameters from default configurations set above
 # this allows you to overwrite only specified parameters
 
-tags: ["promoter_design", "sfm_cnn"]
+tags: ["promoter_design", "promoter_model"]
 
 seed: 12345
 
@@ -20,21 +20,21 @@ trainer:
   min_epochs: 1
   max_epochs: 1000
   gradient_clip_val: 1.0
+  num_sanity_val_steps: 0
 
 model:
-  optimizer:
-    lr: 0.001
+  compile: false
+  promoter_eval: true
   net:
     k: 1024
     dim: 4
-  manifold: sphere
-  compile: false
-  promoter_eval: true
+  atol: 1e-7
+  rtol: 1e-7
 
 logger:
   wandb:
     tags: ${tags}
     group: "promoter_design"
-    name: promoter_design_sfm_bmlp_B${data.batch_size}
+    name: promoter_design_promdfm_B${data.batch_size}
   aim:
     experiment: "promoter_design"

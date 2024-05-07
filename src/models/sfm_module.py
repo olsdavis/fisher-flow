@@ -3,17 +3,18 @@ from typing import Any
 import torch
 from torch.nn import functional as F
 from lightning import LightningModule
+from torch.optim.optimizer import Optimizer
 from torchmetrics import MeanMetric
 from torch_ema import ExponentialMovingAverage
 
 
 from src.sfm import (
-    Manifold,
     OTSampler,
     estimate_categorical_kl,
     manifold_from_name,
     ot_train_step,
 )
+from src.models.net import TangentWrapper
 from src.data.components.promoter_eval import SeiEval
 
 
@@ -29,12 +30,13 @@ class SFMModule(LightningModule):
         scheduler: torch.optim.lr_scheduler,
         compile: bool,
         manifold: str = "sphere",
+        ot_method: str = "exact",
         promoter_eval: bool = False,
         kl_eval: bool = False,
         kl_samples: int = 512_000,
         label_smoothing: float | None = None,
         ema: bool = False,
-        ema_decay: float = 0.9,
+        ema_decay: float = 0.99,
         tangent_euler: bool = True,
     ) -> None:
         """
@@ -51,19 +53,13 @@ class SFMModule(LightningModule):
         self.smoothing = label_smoothing if label_smoothing and label_smoothing > 1e-6 else None
         self.tangent_euler = tangent_euler
         self.promoter_eval = promoter_eval
-
-        if compile:
-            self.net = torch.compile(net)
-        else:
-            self.net = net
+        self.manifold = manifold_from_name(manifold)
+        self.net = TangentWrapper(self.manifold, net).to(self.device)
         if ema:
             self.ema = ExponentialMovingAverage(self.net.parameters(), decay=ema_decay).to(self.device)
         else:
             self.ema = None
-        # default manifold = sphere
-        self.manifold: Manifold = manifold_from_name(manifold)
-        self.sampler: OTSampler = OTSampler(self.manifold, "exact")
-
+        self.sampler = OTSampler(self.manifold, ot_method) if ot_method != "None" else None
         # for averaging loss across batches
         self.train_loss = MeanMetric()
         self.val_loss = MeanMetric()
@@ -89,12 +85,15 @@ class SFMModule(LightningModule):
         """
         Perform a single model step on a batch of data.
         """
+        # points are on the simplex
+        x_1 = self.manifold.project(x_1)
         return ot_train_step(
             self.manifold.smooth_labels(x_1, mx=self.smoothing) if self.smoothing else x_1,
             self.manifold,
             self.net,
             self.sampler,
             signal=signal,
+            closed_form_drv=False,
         )[0]
 
     def training_step(
@@ -167,7 +166,7 @@ class SFMModule(LightningModule):
                 silent=True,
                 tangent=self.tangent_euler,
             )
-            self.log("val/kl", kl, on_step=False, on_epoch=True, prog_bar=False)
+            self.log("val/kl", kl, on_step=False, on_epoch=True, prog_bar=True)
 
     def test_step(self, x_1: torch.Tensor | list[torch.Tensor], batch_idx: int):
         """Perform a single test step on a batch of data from the test set.
@@ -185,6 +184,11 @@ class SFMModule(LightningModule):
         # update and log metrics
         self.test_loss(loss)
         self.log("test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True)
+
+    def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
+        # from lightning.pytorch.utilities import grad_norm
+        # print(grad_norm(self.net, norm_type=2))
+        pass
 
     def on_test_epoch_end(self):
         """Evaluates KL if required."""
@@ -204,7 +208,7 @@ class SFMModule(LightningModule):
     def optimizer_step(self, *args, **kwargs):
         super().optimizer_step(*args, **kwargs)
         if self.ema is not None:
-            self.ema.update(self.net.parameters())
+            self.ema.update()
 
     def setup(self, stage: str):
         """Lightning hook that is called at the beginning of fit (train + validate), validate,
@@ -227,7 +231,7 @@ class SFMModule(LightningModule):
 
         :return: A dict containing the configured optimizers and learning-rate schedulers to be used for training.
         """
-        optimizer = self.hparams.optimizer(params=self.trainer.model.parameters())
+        optimizer = self.hparams.optimizer(params=self.net.parameters())
         if self.hparams.scheduler is not None:
             scheduler = self.hparams.scheduler(optimizer=optimizer)
             return {

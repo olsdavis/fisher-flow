@@ -4,15 +4,15 @@
 # python train.py experiment=example
 
 defaults:
-  - override /data: promoter_design
-  - override /model: bsignal_mlp
+  - override /data: toy_dfm
+  - override /model: rfm_tmlp
   - override /callbacks: default
   - override /trainer: default
 
 # all parameters below will be merged with parameters from default configurations set above
 # this allows you to overwrite only specified parameters
 
-tags: ["promoter_design", "sfm_cnn"]
+tags: ["toy_dfm", "cnn"]
 
 seed: 12345
 
@@ -20,21 +20,30 @@ trainer:
   min_epochs: 1
   max_epochs: 1000
   gradient_clip_val: 1.0
+  num_sanity_val_steps: 0
 
 model:
   optimizer:
     lr: 0.001
   net:
-    k: 1024
-    dim: 4
-  manifold: sphere
+    k: ${data.k}
+    dim: ${data.dim}
   compile: false
-  promoter_eval: true
+  kl_eval: true
+  atol: 1e-7
+  rtol: 1e-7
+  # ema: true
+  # label_smoothing: 0.81
+
+data:
+  batch_size: 512
+  k: 4
+  dim: 100
 
 logger:
   wandb:
     tags: ${tags}
-    group: "promoter_design"
-    name: promoter_design_sfm_bmlp_B${data.batch_size}
+    group: "toy_dfm"
+    name: rfm_toy_dfm_${data.k}_${data.dim}
   aim:
-    experiment: "promoter_design"
+    experiment: "toy_dfm"

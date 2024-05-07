@@ -4,6 +4,7 @@ from torch import Tensor, nn
 import copy
 import torch.nn.functional as F
 import numpy as np
+from src.sfm import Manifold
 
 
 def str_to_activation(name: str) -> nn.Module:
@@ -18,6 +19,33 @@ def str_to_activation(name: str) -> nn.Module:
         "swish": nn.SiLU(),
     }
     return acts[name]
+
+
+class TangentWrapper(nn.Module):
+    """
+    Wraps a model with a projection on a manifold's tangent space.
+    """
+
+    def __init__(self, manifold: Manifold, model: nn.Module):
+        """
+        Parameters:
+            - `manifold`: the manifold to operate on;
+            - `model`: the model to wrap.
+        """
+        super().__init__()
+        self.manifold = manifold
+        self.model = model
+        self.missing_coordinate = (
+            hasattr(model, "missing_coordinate") and model.missing_coordinate()
+        )
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor, **kwargs):
+        """
+        Forward pass with projection.
+        """
+        return self.manifold.make_tangent(
+            x, self.model(x=x, t=t, **kwargs), missing_coordinate=self.missing_coordinate,
+        )
 
 
 class ProductMLP(nn.Module):
@@ -375,7 +403,7 @@ class BestBlock(nn.Module):
         time_dim: int,
         resid: bool = True,
         act: nn.Module | None = None,
-        b_norm: bool | None = False,
+        b_norm: bool = False,
     ):
         """
         Parameters:
@@ -419,6 +447,7 @@ class BestMLP(nn.Module):
         emb_size: int,
         activation: str = "lrelu",
         batch_norm: bool = False,
+        missing_coordinate: bool = True,
         **_,
     ):
         """
@@ -433,6 +462,7 @@ class BestMLP(nn.Module):
         """
         assert emb_size > 0, "emb_size must be positive"
         super().__init__()
+        self._missing_coordinate = missing_coordinate
         act = str_to_activation(activation)
         self.time_embedding = nn.Sequential(
             # SinusoidalEmbedding(emb_size, scale=25.0),
@@ -442,7 +472,7 @@ class BestMLP(nn.Module):
         fd = k * dim
         for i in range(depth):
             ind = fd if i == 0 else hidden
-            out = hidden if i < depth - 1 else fd
+            out = hidden if i < depth - 1 else (fd if not missing_coordinate else fd - k)
             layers += [
                 BestBlock(
                     ind,
@@ -457,13 +487,64 @@ class BestMLP(nn.Module):
 
     def forward(self, x: Tensor, t: Tensor) -> Tensor:
         """Forward pass."""
-        final_shape = x.shape
+        prods = x.size(1)
         x = x.view((x.size(0), -1))
         emb = self.time_embedding(t)
         for layer in self.net:
             x = layer(x, emb)
-        x = x.view(final_shape)
+        x = x.view(x.size(0), prods, -1)
         return x
+
+    def missing_coordinate(self) -> bool:
+        """
+        Returns `True` iff requires missing coordinate completion.
+        """
+        return self._missing_coordinate
+
+
+class BestSignalMLP(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        k: int,
+        hidden: int,
+        depth: int,
+        emb_size: int,
+        activation: str = "lrelu",
+        missing_coordinate: bool = True,
+    ):
+        super().__init__()
+        self._missing_coordinate = missing_coordinate
+        layers = []
+        for i in range(depth):
+            layers += [
+                nn.Linear(
+                    k * (dim + 2) + emb_size if i == 0 else hidden,
+                    hidden if i < depth - 1 else (k * dim if not missing_coordinate else k * dim - k),
+                ),
+            ]
+            if i < depth - 1:
+                layers += [str_to_activation(activation)]
+        self.mlp = nn.Sequential(*layers)
+        self.temb = nn.Linear(1, emb_size)
+        self.k = k
+        self.dim = dim
+
+    def forward(self, x: Tensor, signal: Tensor, t: Tensor) -> Tensor:
+        """Forward pass."""
+        temb = self.temb(t)
+        original = x.shape
+        x = x.view(x.size(0), -1)
+        signal = signal.view(signal.size(0), -1)
+        x = torch.cat([x, signal, temb], dim=-1)
+        ret = self.mlp(x)
+        return ret.view(original[0], self.k, -1)
+
+    def missing_coordinate(self) -> bool:
+        """
+        Returns `True` iff requires missing coordinate completion.
+        """
+        return self._missing_coordinate
 
 
 class UNet1DModel(nn.Module):
@@ -594,8 +675,11 @@ class CNNModel(nn.Module):
             self.cls_embedder = nn.Embedding(num_embeddings=self.num_cls + 1, embedding_dim=self.hidden)
             self.cls_layers = nn.ModuleList([Dense(self.hidden, self.hidden) for _ in range(self.num_layers)])
 
-    def forward(self, x, t, cls = None, return_embedding=False):
-        seq = x
+    def forward(self, x, t: Tensor, cls = None, return_embedding=False):
+        seq = x.view(-1, self.k, self.dim)
+        if len(t.shape) == 0:
+            # odeint is on
+            t = t[None].expand(seq.size(0))
         if self.clean_data:
             feat = self.linear(seq)
             feat = feat.permute(0, 2, 1)
@@ -630,6 +714,9 @@ class CNNModel(nn.Module):
             else:
                 return self.cls_head(feat)
         return feat
+
+    def missing_coordinate(self) -> bool:
+        return False
 
 
 def expand_simplex(xt, alphas, prior_pseudocount):

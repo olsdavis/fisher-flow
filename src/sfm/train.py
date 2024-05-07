@@ -28,7 +28,6 @@ def ot_train_step(
     m: Manifold,
     model: nn.Module,
     sampler: OTSampler | None,
-    time_eps: float = 0.0,
     signal: Tensor | None = None,
     closed_form_drv: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor]:
@@ -49,7 +48,7 @@ def ot_train_step(
     b = x_1.size(0)
     k = x_1.size(1)
     d = x_1.size(-1)
-    t = torch.rand((b, 1), device=x_1.device) * (1.0 - time_eps)
+    t = torch.rand((b, 1), device=x_1.device)
     x_0 = m.uniform_prior(b, k, d).to(x_1.device)
     return cft_loss_function(
         x_0, x_1, t, m, model, sampler, signal=signal, closed_form_drv=closed_form_drv,
@@ -89,6 +88,7 @@ def cft_loss_function(
         x_t = m.geodesic_interpolant(x_0, x_1, t)
         target = m.log_map(x_0, x_1)
         target = m.parallel_transport(x_0, x_t, target)
+        # target = m.log_map(x_t, x_1) / (1.0 - t.unsqueeze(-1) + 1e-7)
     else:
         with torch.inference_mode(False):
             # https://github.com/facebookresearch/riemannian-fm/blob/main/manifm/model_pl.py
@@ -99,13 +99,15 @@ def cft_loss_function(
             x_t, target = vmap(cond_u)(x_0, x_1, t)
         x_t = x_t.squeeze()
         target = target.squeeze()
+        assert m.all_belong_tangent(x_t, target)
+
     # now calculate diffs
     if signal is not None:
-        out = model(x_t, signal, t)
+        out = model(x=x_t, signal=signal, t=t)
     else:
-        out = model(x_t, t)
-    out = m.make_tangent(x_t, out)
+        out = model(x=x_t, t=t)
+    # if not m.all_belong_tangent(x_t, out):
+
+    # assert m.all_belong_tangent(x_t, target)
     diff = out - target
-    loss = m.square_norm_at(x_t, diff)
-    loss = loss.sum(dim=1)
-    return loss.mean(), out, target
+    return diff.square().sum(dim=(-1, -2)).mean(), out, target

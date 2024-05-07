@@ -51,7 +51,7 @@ def estimate_categorical_kl(
     """
     assert sampling_mode in ["sample", "max"], "not a valid sampling mode"
     # init acc
-    acc = torch.zeros_like(real_dist, device=real_dist.device).float()
+    acc = torch.zeros_like(real_dist, device=real_dist.device).int()
 
     model.eval()
     to_sample = [batch] * (n // batch)
@@ -73,10 +73,11 @@ def estimate_categorical_kl(
             samples = nn.functional.one_hot(
                 x_1.argmax(dim=-1),
                 real_dist.size(-1),
-            ).float()
+            )
             acc += samples.sum(dim=0)
-
-    acc /= acc.sum(dim=-1, keepdim=True)
+    acc = acc.float()
+    acc /= n
+    acc.clamp_min_(1e-12)
     if not silent:
         print(acc)
     ret = (acc * (acc.log() - real_dist.log())).sum(dim=-1).mean().item()
