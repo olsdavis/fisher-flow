@@ -1,11 +1,19 @@
 # Adaptation of: https://github.com/HannesStark/dirichlet-flow-matching/blob/main/lightning_modules/dna_module.py
+import copy
+import os
+import time
 from collections import defaultdict
-from typing import Any
+from typing import Any, List
+import pandas as pd
+import numpy as np
+import yaml
+
 import lightning as pl
 import torch
 from torch.distributions import Dirichlet
 from torchmetrics import MeanMetric
 
+from selene_sdk.utils import NonStrandSpecific
 
 from src.models.net import expand_simplex
 from src.dfm import (
@@ -14,7 +22,15 @@ from src.dfm import (
     simplex_proj,
     load_flybrain_designed_seqs,
 )
+from src.experiments.promoter_design import upgrade_state_dict, Sei
+from src.models.net import PromoterModel
 
+
+"""
+test module import
+
+python -m src.models.dfm_module
+"""
 
 class DNAModule(pl.LightningModule):
     def __init__(
@@ -457,3 +473,419 @@ class DNAModule(pl.LightningModule):
                 },
             }
         return {"optimizer": optimizer}
+
+class GeneralModule(pl.LightningModule):
+    def __init__(
+        self,
+        validate: bool = False,
+        print_freq: int = 100,
+    ) -> None:
+        super().__init__()
+        self.save_hyperparameters()
+        #self.args = args
+        self.validate = validate
+        self.print_freq = print_freq
+
+        self.iter_step = -1
+        self._log = defaultdict(list)
+        self.generator = np.random.default_rng()
+        self.last_log_time = time.time()
+
+
+    def try_print_log(self):
+
+        step = self.iter_step if self.validate else self.trainer.global_step
+        if (step + 1) % self.print_freq == 0:
+            print(os.environ["MODEL_DIR"])
+            log = self._log
+            log = {key: log[key] for key in log if "iter_" in key}
+
+            log = self.gather_log(log, self.trainer.world_size)
+            mean_log = self.get_log_mean(log)
+            mean_log.update(
+                {'epoch': float(self.trainer.current_epoch), 'step': float(self.trainer.global_step), 'iter_step': float(self.iter_step)})
+            if self.trainer.is_global_zero:
+                print(str(mean_log))
+                self.log_dict(mean_log, batch_size=1)
+                for metric_name, metric in mean_log.items():
+                    self.log(f'{metric_name}', metric)
+            for key in list(log.keys()):
+                if "iter_" in key:
+                    del self._log[key]
+
+    # def lg(self, key, data):
+    #     if isinstance(data, torch.Tensor):
+    #         data = data.detach().cpu().item()
+    #     log = self._log
+    #     if self.args.validate or self.stage == 'train':
+    #         log["iter_" + key].append(data)
+    #     log[self.stage + "_" + key].append(data)
+
+    def on_train_epoch_end(self):
+        log = self._log
+        log = {key: log[key] for key in log if "train_" in key}
+        log = self.gather_log(log, self.trainer.world_size)
+        mean_log = self.get_log_mean(log)
+        mean_log.update(
+            {'epoch': float(self.trainer.current_epoch), 'step': float(self.trainer.global_step), 'iter_step': float(self.iter_step)})
+
+        if self.trainer.is_global_zero:
+            print(str(mean_log))
+            self.log_dict(mean_log, batch_size=1)
+            for metric_name, metric in mean_log.items():
+                self.log(f'{metric_name}', metric)
+
+        for key in list(log.keys()):
+            if "train_" in key:
+                del self._log[key]
+
+    def on_validation_epoch_end(self):
+        self.generator = np.random.default_rng()
+        log = self._log
+        log = {key: log[key] for key in log if "val_" in key}
+        log = self.gather_log(log, self.trainer.world_size)
+        mean_log = self.get_log_mean(log)
+        mean_log.update(
+            {'epoch': float(self.trainer.current_epoch), 'step': float(self.trainer.global_step), 'iter_step': float(self.iter_step)})
+
+        if self.trainer.is_global_zero:
+            print(str(mean_log))
+            self.log_dict(mean_log, batch_size=1)
+            for metric_name, metric in mean_log.items():
+                self.log(f'{metric_name}', metric)
+
+            path = os.path.join(
+                os.environ["MODEL_DIR"], f"val_{self.trainer.global_step}.csv"
+            )
+            pd.DataFrame(log).to_csv(path)
+
+        for key in list(log.keys()):
+            if "val_" in key:
+                del self._log[key]
+
+
+
+    def gather_log(self, log, world_size):
+        if world_size == 1:
+            return log
+        log_list = [None] * world_size
+        torch.distributed.all_gather_object(log_list, log)
+        log = {key: sum([l[key] for l in log_list], []) for key in log}
+        return log
+
+    def get_log_mean(self, log):
+        out = {}
+        for key in log:
+            try:
+                out[key] = np.nanmean(log[key])
+            except:
+                pass
+        return out
+
+class PromoterModule(GeneralModule):
+    def __init__(
+        self,
+        model: PromoterModel,
+        optimizer: torch.optim.Optimizer,
+        scheduler: torch.optim.lr_scheduler,
+        compile: bool = False,
+        mode: str = 'dirichlet',
+        alpha_max: int = 8,
+        ckpt_iterations: List[int] | Any = None,
+        validate: bool = False,
+        prior_pseudocount: int = 2,
+        fix_alpha: float = None,
+        alpha_scale: float = 2.0,
+        flow_temp: float = 1.0,
+        num_integration_steps: int = 20,
+        distill_ckpt: str = None,
+        distill_ckpt_hparams: str = None,
+        net: Any = None, # TODO: why is this param being added to the yaml config?
+    ) -> None:
+        super().__init__()
+
+        # TODO: move model to .yaml config
+        #self.model = PromoterModel(args)
+        
+        self.mode = mode
+        self.ckpt_iterations = ckpt_iterations
+        self.validate = validate
+        self.prior_pseudocount = prior_pseudocount
+        self.alpha_max = alpha_max
+        self.fix_alpha = fix_alpha
+        self.alpha_scale = alpha_scale
+        self.flow_temp = flow_temp
+        self.num_integration_steps = num_integration_steps
+        self.distill_ckpt = distill_ckpt
+        self.distill_ckpt_hparams = distill_ckpt_hparams
+
+        if compile:
+            self.model = torch.compile(model)
+        else:
+            self.model = model
+
+
+        self.condflow = DirichletConditionalFlow(
+        K=self.model.alphabet_size, alpha_spacing=0.01, alpha_max=alpha_max)
+
+        self.seifeatures = pd.read_csv('data/promoter_design/target.sei.names', sep='|', header=None)
+        self.sei_cache = {}
+        self.loaded_distill_model = False
+
+    def on_load_checkpoint(self, checkpoint):
+        checkpoint['state_dict'] = {k: v for k,v in checkpoint['state_dict'].items() if 'distill_model' not in k}
+
+    def training_step(self, batch, batch_idx):
+        self.stage = 'train'
+        loss = self.general_step(batch, batch_idx)
+        if self.ckpt_iterations is not None and self.trainer.global_step in self.ckpt_iterations:
+            self.trainer.save_checkpoint(os.path.join(os.environ["MODEL_DIR"],f"epoch={self.trainer.current_epoch}-step={self.trainer.global_step}.ckpt"))
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        self.stage = 'val'
+        loss = self.general_step(batch, batch_idx)
+        if self.validate:
+            self.try_print_log()
+
+    def general_step(self, batch, batch_idx=None):
+        self.iter_step += 1
+        seq_one_hot = batch[:, :, :4]
+        seq = torch.argmax(seq_one_hot, dim=-1)
+        signal = batch[:, :, 4:5]
+        
+        B, L = seq.shape
+
+        if self.mode == 'dirichlet' or self.mode == 'riemannian':
+            xt, alphas = sample_cond_prob_path(
+                mode=self.mode, fix_alpha=self.fix_alpha,
+                alpha_scale=self.alpha_scale, seq=seq, alphabet_size=self.model.alphabet_size)
+            xt, prior_weights = expand_simplex(
+                xt, alphas, self.prior_pseudocount)
+            self.lg('prior_weight', prior_weights)
+        elif self.mode == 'ardm' or self.mode == 'lrar':
+            mask_prob = torch.rand(1, device=self.device)
+            mask = torch.rand(seq.shape, device=self.device) < mask_prob
+            if self.mode == 'lrar': mask = ~(torch.arange(L, device=self.device) < (1-mask_prob) * L)
+            xt = torch.where(mask, 4, seq) # mask token has idx 4
+            xt = torch.nn.functional.one_hot(xt, num_classes=5)
+            alphas = mask_prob.expand(B)
+        elif self.mode == 'distill':
+            if self.stage == 'val':
+                seq_distill = torch.zeros_like(seq, device=self.device)
+                xt = torch.ones((B,L, self.model.alphabet_size), device=self.device)
+                xt = xt / xt.sum(-1)[..., None]
+            else:
+                logits_distill, xt = self.dirichlet_flow_inference(seq, signal, model=self.distill_model,
+                    alpha_max=self.alpha_max, prior_pseudocount=self.prior_pseudocount, flow_temp=self.flow_temp)
+                seq_distill = torch.argmax(logits_distill, dim=-1)
+            alphas = torch.zeros(B, device=self.device)
+
+        logits = self.model(xt, signal=signal, t=alphas)
+
+        losses = torch.nn.functional.cross_entropy(logits.transpose(1, 2), seq_distill if self.mode == 'distill' else seq, reduction='none')
+        losses = losses.mean(-1)
+
+        self.log('alpha', alphas)
+        self.log('loss', losses)
+        self.log('perplexity', torch.exp(losses.mean())[None].expand(B))
+        self.log('dur', torch.tensor(time.time() - self.last_log_time)[None].expand(B))
+        if self.stage == "val":
+
+            if self.mode == 'dirichlet':
+                logits_pred, _ = self.dirichlet_flow_inference(seq, signal, self.model,
+                    alpha_max=self.alpha_max, prior_pseudocount=self.prior_pseudocount, flow_temp=self.flow_temp)
+                seq_pred = torch.argmax(logits_pred, dim=-1)
+            elif self.mode == 'riemannian':
+                logits_pred = self.riemannian_flow_inference(seq, signal)
+                seq_pred = torch.argmax(logits_pred, dim=-1)
+            elif self.mode == 'ardm' or self.mode == 'lrar':
+                seq_pred = self.ar_inference(seq, signal)
+            elif self.mode == 'distill':
+                logits_pred = self.distill_inference(seq, signal)
+                seq_pred = torch.argmax(logits_pred, dim=-1)
+            else:
+                raise NotImplementedError()
+            self.lg('seq', [''.join([['A','C','G','T'][num] for num in seq]) for seq in seq_pred])
+            seq_pred_one_hot = torch.nn.functional.one_hot(seq_pred, num_classes=self.model.alphabet_size).float()
+
+            if batch_idx not in self.sei_cache:
+                sei_profile = self.get_sei_profile(seq_one_hot)
+                self.sei_cache = sei_profile
+            else:
+                sei_profile = self.sei_cache[batch_idx]
+
+            sei_profile_pred = self.get_sei_profile(seq_pred_one_hot)
+            self.lg('sp-mse', ((sei_profile - sei_profile_pred) ** 2))
+            self.lg('recovery', seq_pred.eq(seq).float().mean(-1))
+
+        self.last_log_time = time.time()
+        return losses.mean()
+
+    def get_sei_profile(self, seq_one_hot):
+        B, L, K = seq_one_hot.shape
+        sei_inp = torch.cat([torch.ones((B, 4, 1536), device=self.device) * 0.25,
+                             seq_one_hot.transpose(1, 2),
+                             torch.ones((B, 4, 1536), device=self.device) * 0.25], 2) # batchsize x 4 x 4,096
+        sei_out = self.sei(sei_inp).cpu().detach().numpy() # batchsize x 21,907
+        sei_out = sei_out[:, self.seifeatures[1].str.strip().values == 'H3K4me3'] # batchsize x 2,350
+        predh3k4me3 = sei_out.mean(axis=1) # batchsize
+        return predh3k4me3
+
+    @torch.no_grad()
+    def distill_inference(self, seq,signal):
+        B, L = seq.shape
+        K = self.model.alphabet_size
+        x0 = torch.distributions.Dirichlet(torch.ones(B, L, K, device=seq.device)).sample()
+        logits = self.model(x0,signal, t=torch.zeros(B, device=self.device))
+        return logits
+
+    @torch.no_grad()
+    def riemannian_flow_inference(self, seq, signal, batch_idx=None):
+        B, L = seq.shape
+        K = self.model.alphabet_size
+        xt = torch.distributions.Dirichlet(torch.ones(B, L, K)).sample().to(self.device)
+        eye = torch.eye(K).to(self.device)
+
+        t_span = torch.linspace(0, 1, self.num_integration_steps, device=self.device)
+        for s, t in zip(t_span[:-1], t_span[1:]):
+            xt_expanded, prior_weights = expand_simplex(xt, s[None].expand(B), self.prior_pseudocount)
+            logits = self.model(xt_expanded, signal, s[None].expand(B))
+            probs = torch.nn.functional.softmax(logits, -1)
+            cond_flows = (eye - xt.unsqueeze(-1)) / (1 - s)
+            flow = (probs.unsqueeze(-2) * cond_flows).sum(-1)
+            xt = xt + flow * (t - s)
+
+        return logits
+
+    @torch.no_grad()
+    def dirichlet_flow_inference(self, seq, signal, model, alpha_max, prior_pseudocount, flow_temp):
+        B, L = seq.shape
+        x0 = torch.distributions.Dirichlet(torch.ones(B, L, model.alphabet_size, device=seq.device)).sample()
+        eye = torch.eye(model.alphabet_size).to(x0)
+        xt = x0
+
+        t_span = torch.linspace(1, alpha_max, self.num_integration_steps, device=self.device)
+        for i, (s, t) in enumerate(zip(t_span[:-1], t_span[1:])):
+            prior_weight = prior_pseudocount / (s + prior_pseudocount - 1)
+            seq_xt = torch.cat([xt * (1 - prior_weight), xt * prior_weight], -1)
+
+            logits = model(seq_xt, signal, s[None].expand(B))
+            out_probs = torch.nn.functional.softmax(logits / flow_temp, -1)
+
+            c_factor = self.condflow.c_factor(xt.cpu().numpy(), s.item())
+            c_factor = torch.from_numpy(c_factor).to(xt)
+            if torch.isnan(c_factor).any():
+                print(f'NAN cfactor after: xt.min(): {xt.min()}, out_probs.min(): {out_probs.min()}')
+                c_factor = torch.nan_to_num(c_factor)
+
+            cond_flows = (eye - xt.unsqueeze(-1)) * c_factor.unsqueeze(-2)
+            flow = (out_probs.unsqueeze(-2) * cond_flows).sum(-1)
+            xt = xt + flow * (t - s)
+            if not torch.allclose(xt.sum(2), torch.ones((B, L), device=self.device), atol=1e-4) or not (xt >= 0).all():
+                print(f'WARNING: xt.min(): {xt.min()}. Some values of xt do not lie on the simplex. There are we are {(xt<0).sum()} negative values in xt of shape {xt.shape} that are negative.')
+                xt = simplex_proj(xt)
+
+        return logits, x0
+
+
+    @torch.no_grad()
+    def ar_inference(self, seq, signal):
+        B, L = seq.shape
+        order = np.arange(L)
+        if self.mode =='ardm': np.random.shuffle(order)
+        curr = (torch.ones((B, L), device=self.device) * 4).long()
+        for i, k in enumerate(order):
+            t = torch.tensor( i/L ,device=self.device)
+            logits = self.model(torch.nn.functional.one_hot(curr, num_classes=5), signal, t[None].expand(B))
+            curr[:, k] = torch.distributions.Categorical(probs=torch.nn.functional.softmax(logits[:, k] / self.flow_temp, -1)).sample()
+        return curr
+
+    @torch.no_grad()
+    def on_validation_epoch_start(self) -> None:
+        print('Loading sei model')
+        self.sei = NonStrandSpecific(Sei(4096, 21907))
+        self.sei.load_state_dict(upgrade_state_dict(
+            torch.load('data/promoter_design/best.sei.model.pth.tar', map_location='cpu')['state_dict'],
+            prefixes=['module.']))
+        self.sei.to(self.device)
+        self.generator = np.random.default_rng(seed=137)
+
+    def load_distill_model(self):
+        with open(self.distill_ckpt_hparams) as f:
+            hparams = yaml.load(f, Loader=yaml.UnsafeLoader)
+            self.distill_args = copy.deepcopy(hparams['args'])
+        self.distill_model =  PromoterModel(
+            mode=self.distill_args.mode, embed_dim=self.distill_args.embed_dim,
+            time_dependent_weights=self.distill_args.time_dependent_weights,
+            time_step=self.distill_args.time_step)
+        upgraded_dict = upgrade_state_dict(torch.load(self.distill_ckpt, map_location=self.device)['state_dict'], prefixes=['model.'])
+        self.distill_model.load_state_dict(upgraded_dict)
+        self.distill_model.eval()
+        self.distill_model.to(self.device)
+        for param in self.distill_model.parameters():
+            param.requires_grad = False
+
+
+    def on_train_epoch_start(self) -> None:
+        if not self.loaded_distill_model and self.distill_ckpt is not None:
+            self.load_distill_model()
+            self.loaded_distill_model = True
+
+    def on_validation_epoch_end(self):
+        del self.sei
+        torch.cuda.empty_cache()
+        self.generator = np.random.default_rng()
+        log = self._log
+        log = {key: log[key] for key in log if "val_" in key}
+        log = self.gather_log(log, self.trainer.world_size)
+        mean_log = self.get_log_mean(log)
+        mean_log.update({'epoch': self.trainer.current_epoch, 'step': self.trainer.global_step, 'iter_step': self.iter_step})
+
+        if self.trainer.is_global_zero:
+            print(str(mean_log))
+            self.log_dict(mean_log, batch_size=1)
+            for metric_name, metric in mean_log.items():
+                self.log(metric_name, metric)
+
+            path = os.path.join(os.environ["MODEL_DIR"], f"val_{self.trainer.global_step}.csv")
+            pd.DataFrame(log).to_csv(path)
+
+        for key in list(log.keys()):
+            if "val_" in key:
+                del self._log[key]
+
+    # def lg(self, key, data):
+    #     if isinstance(data, torch.Tensor):
+    #         data = data.detach().cpu().numpy()
+    #     log = self._log
+    #     if self.args.validate or self.stage == 'train':
+    #         log["iter_" + key].extend(data)
+    #     log[self.stage + "_" + key].extend(data)
+
+    def configure_optimizers(self) -> dict[str, Any]:
+        """Choose what optimizers and learning-rate schedulers to use in your optimization.
+        Normally you'd need one. But in the case of GANs or similar you might have multiple.
+
+        Examples:
+            https://lightning.ai/docs/pytorch/latest/common/lightning_module.html#configure-optimizers
+
+        :return: A dict containing the configured optimizers and learning-rate schedulers to be used for training.
+        """
+        optimizer = self.hparams.optimizer(params=self.trainer.model.parameters())
+        if self.hparams.scheduler is not None:
+            scheduler = self.hparams.scheduler(optimizer=optimizer)
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "monitor": "val/loss",
+                    "interval": "epoch",
+                    "frequency": 1,
+                },
+            }
+        return {"optimizer": optimizer}
+
+if __name__ == "__main__":
+    model = PromoterModel(mode='dirichlet')
+    PromoterModule(model, None, None)

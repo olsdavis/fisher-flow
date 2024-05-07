@@ -15,7 +15,7 @@ defaults:
 # first tag is the data set, second tag is the model
 tags: ["retrosyn", "retro_bridge"]
 
-seed: 12345
+seed: 12347
 
 trainer:
   min_epochs: 1
@@ -23,7 +23,7 @@ trainer:
   gradient_clip_val: 1.0
   num_sanity_val_steps: 0
   accelerator: 'gpu'
-  devices: [1]
+  devices: [0]
 
 model:
   optimizer:
@@ -39,6 +39,6 @@ logger:
     project: sfm
     tags: ${tags}
     group: retrosyn
-    name: retrobridge_retro_syn_s12345
+    name: retrobridge_retro_syn_s12347
   aim:
     experiment: test_exp

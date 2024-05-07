@@ -1,7 +1,8 @@
 # Simplex-Flows
 
-TODO:
-
+```py
+python -m src.train experiment=toy_dfm_sfm_cnn
+```
 ## Promoter and Enhancer DNA Experiment
 
 TODO:
