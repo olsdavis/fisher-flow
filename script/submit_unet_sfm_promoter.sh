@@ -7,4 +7,4 @@
 #SBATCH --qos=medium
 #SBATCH --gres=gpu:4
 conda activate sfm
-python -m src.train experiment=promoter_sfm_unet1d trainer=ddp trainer.devices=4 data.batch_size=2048 logger=wandb
+python -m src.train experiment=promoter_sfm_unet1d model.net.depth=$1 model.net.filters=$2 trainer=ddp trainer.devices=4 data.batch_size=2048 logger=wandb

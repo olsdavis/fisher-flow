@@ -633,17 +633,19 @@ class UNet1DSignal(nn.Module):
         k: int,
         dim: int,
         activation: str = "swish",
+        depth: int = 3,
+        filters: int = 64,
     ):
         super().__init__()
         self.diffusers_unet = self.DiffusersUNet(
             sample_size=k,
             in_channels=dim+2,
             out_channels=dim,
-            block_out_channels=(64, 128,),
-            down_block_types=("DownBlock1D", "DownBlock1D"),
-            up_block_types=("UpBlock1D", "UpBlock1D"),
+            block_out_channels=(filters,) * depth,
+            down_block_types=("DownBlock1D",) * depth,
+            up_block_types=("UpBlock1D",) * depth,
             act_fn=activation,
-            norm_num_groups=16,
+            norm_num_groups=min(filters // 2, 32),
         )
 
     def forward(self, x: Tensor, t: Tensor, signal: Tensor) -> Tensor:

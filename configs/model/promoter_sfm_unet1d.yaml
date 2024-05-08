@@ -16,6 +16,8 @@ scheduler:
 net:
   _target_: src.models.net.UNet1DSignal
   activation: swish
+  depth: 3
+  filters: 128
 
 
 compile: false
