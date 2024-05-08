@@ -12,7 +12,7 @@ defaults:
 # all parameters below will be merged with parameters from default configurations set above
 # this allows you to overwrite only specified parameters
 
-tags: ["promoter_design", "sfm_cnn"]
+tags: ["promoter_design", "sfm_unet1d"]
 
 seed: 12345
 
@@ -30,7 +30,8 @@ model:
   manifold: sphere
   compile: false
   promoter_eval: true
-  inference_steps: 20
+  inference_steps: 100
+  ot_method: None
 
 logger:
   wandb:

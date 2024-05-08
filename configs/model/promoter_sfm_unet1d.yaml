@@ -15,7 +15,7 @@ scheduler:
 
 net:
   _target_: src.models.net.UNet1DSignal
-  activation: gelu
+  activation: swish
 
 
 compile: false

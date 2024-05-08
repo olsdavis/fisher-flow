@@ -547,6 +547,53 @@ class BestSignalMLP(nn.Module):
         return self._missing_coordinate
 
 
+
+class BestEnhancerMLP(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        k: int,
+        hidden: int,
+        depth: int,
+        emb_size: int,
+        activation: str = "lrelu",
+        missing_coordinate: bool = True,
+        signal_size: int = 1,
+    ):
+        super().__init__()
+        self._missing_coordinate = missing_coordinate
+        layers = []
+        for i in range(depth):
+            layers += [
+                nn.Linear(
+                    k * dim + signal_size + emb_size if i == 0 else hidden,
+                    hidden if i < depth - 1 else (k * dim if not missing_coordinate else k * dim - k),
+                ),
+            ]
+            if i < depth - 1:
+                layers += [str_to_activation(activation)]
+        self.mlp = nn.Sequential(*layers)
+        self.temb = nn.Linear(1, emb_size)
+        self.k = k
+        self.dim = dim
+
+    def forward(self, x: Tensor, signal: Tensor, t: Tensor) -> Tensor:
+        """Forward pass."""
+        temb = self.temb(t)
+        original = x.shape
+        x = x.view(x.size(0), -1)
+        signal = signal.view(signal.size(0), -1)
+        x = torch.cat([x, signal, temb], dim=-1)
+        ret = self.mlp(x)
+        return ret.view(original[0], self.k, -1)
+
+    def missing_coordinate(self) -> bool:
+        """
+        Returns `True` iff requires missing coordinate completion.
+        """
+        return self._missing_coordinate
+
+
 class UNet1DModel(nn.Module):
     """
     Adaptation of diffusers UNet1D.
@@ -592,11 +639,11 @@ class UNet1DSignal(nn.Module):
             sample_size=k,
             in_channels=dim+2,
             out_channels=dim,
-            block_out_channels=(64, 64,),
-            down_block_types=("DownBlock1D", "AttnDownBlock1D"),
-            up_block_types=("AttnUpBlock1D", "UpBlock1D"),
+            block_out_channels=(64, 128,),
+            down_block_types=("DownBlock1D", "DownBlock1D"),
+            up_block_types=("UpBlock1D", "UpBlock1D"),
             act_fn=activation,
-            norm_num_groups=8,
+            norm_num_groups=16,
         )
 
     def forward(self, x: Tensor, t: Tensor, signal: Tensor) -> Tensor:
