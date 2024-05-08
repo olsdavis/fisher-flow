@@ -5,10 +5,10 @@ python -m src.train experiment=toy_dfm_sfm_cnn
 ```
 ## Promoter and Enhancer DNA Experiment
 
-TODO:
+To run the dirichlet flow model on the promoter and enhancer dataset:
 
 ```py
-python xxx.py --arg1 --arg2
+python -m src.train experiment=promoter_dfm logger=wandb
 ```
 
 ## RetroBridge: Products and Reactants Experiment

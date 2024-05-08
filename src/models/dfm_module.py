@@ -185,7 +185,7 @@ class DNAModule(pl.LightningModule):
             reduction='mean',
         )
 
-        # self.lg('perplexity', torch.exp(losses.mean())[None].expand(B))
+        # self.log('perplexity', torch.exp(losses.mean())[None].expand(B))
         if self.stage == "val":
             if self.mode == 'dirichlet':
                 logits_pred, _ = self.dirichlet_flow_inference(seq, None, model=self.net)
@@ -407,8 +407,8 @@ class DNAModule(pl.LightningModule):
         if run_log:
             if not self.target_class == self.net.num_cls:
                 losses = self.crossent_loss(logits, cls)
-                # self.lg(f'cls_loss{postfix}', losses)
-            # self.lg(f'cls_accuracy{postfix}', cls_pred.eq(cls).float())
+                # self.log(f'cls_loss{postfix}', losses)
+            # self.log(f'cls_accuracy{postfix}', cls_pred.eq(cls).float())
 
         log_dict[f'embeddings{postfix}'].append(embeddings.detach().cpu())
         log_dict[f'clss{postfix}'].append(cls.detach().cpu())
@@ -479,12 +479,14 @@ class GeneralModule(pl.LightningModule):
         self,
         validate: bool = False,
         print_freq: int = 100,
+        model_dir: str = 'tmp',
     ) -> None:
         super().__init__()
         self.save_hyperparameters()
         #self.args = args
         self.validate = validate
         self.print_freq = print_freq
+        self.model_dir = model_dir
 
         self.iter_step = -1
         self._log = defaultdict(list)
@@ -496,7 +498,7 @@ class GeneralModule(pl.LightningModule):
 
         step = self.iter_step if self.validate else self.trainer.global_step
         if (step + 1) % self.print_freq == 0:
-            print(os.environ["MODEL_DIR"])
+            print(self.model_dir)
             log = self._log
             log = {key: log[key] for key in log if "iter_" in key}
 
@@ -555,7 +557,7 @@ class GeneralModule(pl.LightningModule):
                 self.log(f'{metric_name}', metric)
 
             path = os.path.join(
-                os.environ["MODEL_DIR"], f"val_{self.trainer.global_step}.csv"
+                self.model_dir, f"val_{self.trainer.global_step}.csv"
             )
             pd.DataFrame(log).to_csv(path)
 
@@ -593,6 +595,7 @@ class PromoterModule(GeneralModule):
         alpha_max: int = 8,
         ckpt_iterations: List[int] | Any = None,
         validate: bool = False,
+        print_freq: int = 100,
         prior_pseudocount: int = 2,
         fix_alpha: float = None,
         alpha_scale: float = 2.0,
@@ -602,7 +605,7 @@ class PromoterModule(GeneralModule):
         distill_ckpt_hparams: str = None,
         net: Any = None, # TODO: why is this param being added to the yaml config?
     ) -> None:
-        super().__init__()
+        super().__init__(validate=validate, print_freq=print_freq)
 
         # TODO: move model to .yaml config
         #self.model = PromoterModel(args)
@@ -632,6 +635,8 @@ class PromoterModule(GeneralModule):
         self.sei_cache = {}
         self.loaded_distill_model = False
 
+        self.model_dir = 'tmp'
+
     def on_load_checkpoint(self, checkpoint):
         checkpoint['state_dict'] = {k: v for k,v in checkpoint['state_dict'].items() if 'distill_model' not in k}
 
@@ -639,7 +644,7 @@ class PromoterModule(GeneralModule):
         self.stage = 'train'
         loss = self.general_step(batch, batch_idx)
         if self.ckpt_iterations is not None and self.trainer.global_step in self.ckpt_iterations:
-            self.trainer.save_checkpoint(os.path.join(os.environ["MODEL_DIR"],f"epoch={self.trainer.current_epoch}-step={self.trainer.global_step}.ckpt"))
+            self.trainer.save_checkpoint(os.path.join(self.model_dir, f"epoch={self.trainer.current_epoch}-step={self.trainer.global_step}.ckpt"))
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -652,17 +657,18 @@ class PromoterModule(GeneralModule):
         self.iter_step += 1
         seq_one_hot = batch[:, :, :4]
         seq = torch.argmax(seq_one_hot, dim=-1)
-        signal = batch[:, :, 4:5]
+        signal = batch[:, :, 4:5] # [128, 1024, 1]
         
         B, L = seq.shape
 
         if self.mode == 'dirichlet' or self.mode == 'riemannian':
+            #import pdb; pdb.set_trace()
             xt, alphas = sample_cond_prob_path(
                 mode=self.mode, fix_alpha=self.fix_alpha,
-                alpha_scale=self.alpha_scale, seq=seq, alphabet_size=self.model.alphabet_size)
+                alpha_scale=self.alpha_scale, seq=seq, alphabet_size=self.model.alphabet_size) # [128, 1024, 4], [128]
             xt, prior_weights = expand_simplex(
-                xt, alphas, self.prior_pseudocount)
-            self.lg('prior_weight', prior_weights)
+                xt, alphas, self.prior_pseudocount) # [128, 1024, 8]
+            self.log('prior_weight', prior_weights.mean())
         elif self.mode == 'ardm' or self.mode == 'lrar':
             mask_prob = torch.rand(1, device=self.device)
             mask = torch.rand(seq.shape, device=self.device) < mask_prob
@@ -686,10 +692,11 @@ class PromoterModule(GeneralModule):
         losses = torch.nn.functional.cross_entropy(logits.transpose(1, 2), seq_distill if self.mode == 'distill' else seq, reduction='none')
         losses = losses.mean(-1)
 
-        self.log('alpha', alphas)
-        self.log('loss', losses)
-        self.log('perplexity', torch.exp(losses.mean())[None].expand(B))
-        self.log('dur', torch.tensor(time.time() - self.last_log_time)[None].expand(B))
+        # TODO: remove .mean() from log
+        self.log('alpha', alphas.mean())
+        self.log('loss', losses.mean())
+        self.log('perplexity', torch.exp(losses.mean())[None].expand(B).mean())
+        self.log('dur', torch.tensor(time.time() - self.last_log_time)[None].expand(B).mean())
         if self.stage == "val":
 
             if self.mode == 'dirichlet':
@@ -706,7 +713,8 @@ class PromoterModule(GeneralModule):
                 seq_pred = torch.argmax(logits_pred, dim=-1)
             else:
                 raise NotImplementedError()
-            self.lg('seq', [''.join([['A','C','G','T'][num] for num in seq]) for seq in seq_pred])
+            # TODO: add to log
+            #self.log('seq', [''.join([['A','C','G','T'][num] for num in seq]) for seq in seq_pred])
             seq_pred_one_hot = torch.nn.functional.one_hot(seq_pred, num_classes=self.model.alphabet_size).float()
 
             if batch_idx not in self.sei_cache:
@@ -716,8 +724,9 @@ class PromoterModule(GeneralModule):
                 sei_profile = self.sei_cache[batch_idx]
 
             sei_profile_pred = self.get_sei_profile(seq_pred_one_hot)
-            self.lg('sp-mse', ((sei_profile - sei_profile_pred) ** 2))
-            self.lg('recovery', seq_pred.eq(seq).float().mean(-1))
+            # TODO: remove .mean() from log
+            self.log('sp-mse', ((sei_profile - sei_profile_pred) ** 2).mean())
+            self.log('recovery', seq_pred.eq(seq).float().mean(-1).mean())
 
         self.last_log_time = time.time()
         return losses.mean()
@@ -848,7 +857,7 @@ class PromoterModule(GeneralModule):
             for metric_name, metric in mean_log.items():
                 self.log(metric_name, metric)
 
-            path = os.path.join(os.environ["MODEL_DIR"], f"val_{self.trainer.global_step}.csv")
+            path = os.path.join(self.model_dir, f"val_{self.trainer.global_step}.csv")
             pd.DataFrame(log).to_csv(path)
 
         for key in list(log.keys()):

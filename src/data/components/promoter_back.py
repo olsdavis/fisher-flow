@@ -1193,7 +1193,14 @@ class GenomicSignalFeatures(Target):
 
 
 class PromoterDataset(torch.utils.data.Dataset):
-    def __init__(self, seqlength=1024, split="train", n_tsses=100000, rand_offset=0):
+    def __init__(
+        self, 
+        seqlength=1024, 
+        split="train", 
+        n_tsses=100000, 
+        rand_offset=0, 
+        sep_x_y=False,
+    ) -> None:
         class ModelParameters:
             seifeatures_file = 'data/promoter_design/target.sei.names'
             seimodel_file = 'data/promoter_design/best.sei.model.pth.tar'
@@ -1246,6 +1253,7 @@ class PromoterDataset(torch.utils.data.Dataset):
             raise ValueError
         self.rand_offset = rand_offset
         self.seqlength = seqlength
+        self.sep_x_y = sep_x_y # whether to return x and y separately
 
     def __len__(self):
         return self.tsses.shape[0]
@@ -1263,8 +1271,10 @@ class PromoterDataset(torch.utils.data.Dataset):
                                                 pos + int(self.seqlength / 2) + offset)
         if strand == '-':
             signal = signal[::-1, ::-1]
-        # return np.concatenate([seq, signal.T], axis=-1).astype(np.float32)
-        return seq.astype(np.float32), signal.T.astype(np.float32)
+        if self.sep_x_y:
+            return seq.astype(np.float32), signal.T.astype(np.float32)
+        else:
+            return np.concatenate([seq, signal.T], axis=-1).astype(np.float32)
 
     def reset(self):
         np.random.seed(0)

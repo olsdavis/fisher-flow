@@ -17,23 +17,26 @@ tags: ["promoter_design", "promoter_model"]
 seed: 12345
 
 trainer:
-  min_epochs: 1
-  max_epochs: 1000
+  max_steps: 450000
+  limit_train_batches: null
   gradient_clip_val: 1.0
   accelerator: 'gpu'
   devices: [0]
 
 model:
   compile: false
-  promoter_eval: true
-  net:
-    mode: sfm  # just ignores the custom stuff
+  net: # TODO: not used remove
+  model:
+    mode: dirichlet
+    embed_dim: 256
+    time_dependent_weights: null
+    time_step: 0.01
 
 logger:
   wandb:
     project: sfm
     tags: ${tags}
     group: promoter_design
-    name: promoter_design_promdfm_B${data.batch_size}_{seed}
+    name: promoter_design_promdfm_B${data.batch_size}_s${seed}
   aim:
     experiment: "promoter_design"

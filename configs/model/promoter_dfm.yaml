@@ -8,7 +8,7 @@ optimizer:
 
 scheduler: null
 
-net:
+model:
   _target_: src.models.net.PromoterModel
   mode: dirichlet
   embed_dim: 256
@@ -17,12 +17,16 @@ net:
 
 compile: false
 
-mode: net.mode
+mode: dirichlet
+
+# validate
+validate: false
 
 # run settings
 distill_ckpt: null # cls model for evaluation purposes
 distill_ckpt_hparams: null
 
+# model
 fix_alpha: null
 alpha_scale: 2
 alpha_max: 8
@@ -33,11 +37,5 @@ num_integration_steps: 100
 # logging
 print_freq: 100
 
+# misc.
 ckpt_iterations: null
-
-validate: false
-
-
-check_val_every_n_epoch: 5
-
-limit_val_batches: 16
