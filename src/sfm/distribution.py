@@ -77,7 +77,7 @@ def estimate_categorical_kl(
             acc += samples.sum(dim=0)
     acc = acc.float()
     acc /= n
-    acc.clamp_min_(1e-12)
+    # acc.clamp_min_(1e-12)
     if not silent:
         print(acc)
     ret = (acc * (acc.log() - real_dist.log())).sum(dim=-1).mean().item()

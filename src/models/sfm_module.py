@@ -40,6 +40,7 @@ class SFMModule(LightningModule):
         ema_decay: float = 0.99,
         tangent_euler: bool = True,
         debug_grads: bool = False,
+        inference_steps: int = 100,
     ) -> None:
         """
         :param net: The model to train.
@@ -73,6 +74,7 @@ class SFMModule(LightningModule):
         self.kl_eval = kl_eval
         self.kl_samples = kl_samples
         self.debug_grads = debug_grads
+        self.inference_steps = inference_steps
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Perform a forward pass through the model `self.net`."""
@@ -149,12 +151,12 @@ class SFMModule(LightningModule):
             pred = self.manifold.tangent_euler(
                 self.manifold.uniform_prior(*x_1.shape[:-1], 4).to(x_1.device),
                 eval_model,
-                steps=100,
+                steps=self.inference_steps,
                 tangent=self.tangent_euler,
             )
-            mx = torch.argmax(x_1, dim=-1)
+            mx = torch.argmax(pred, dim=-1)
             one_hot = F.one_hot(mx, num_classes=4)
-            mse = SeiEval().eval_sp_mse(pred, one_hot, batch_idx)
+            mse = SeiEval().eval_sp_mse(one_hot, x_1, batch_idx)
             self.sp_mse(mse)
             self.log("val/sp-mse", self.sp_mse, on_step=False, on_epoch=True, prog_bar=True)
 
@@ -171,6 +173,7 @@ class SFMModule(LightningModule):
                 batch=self.hparams.get("kl_batch", 2048),
                 silent=True,
                 tangent=self.tangent_euler,
+                inference_steps=self.inference_steps,
             )
             self.log("val/kl", kl, on_step=False, on_epoch=True, prog_bar=True)
 

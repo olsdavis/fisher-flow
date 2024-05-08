@@ -575,6 +575,36 @@ class UNet1DModel(nn.Module):
         return self.diffusers_unet(x, t.squeeze(), return_dict=False)[0]
 
 
+class UNet1DSignal(nn.Module):
+    """
+    Adaptation of diffusers UNet1D.
+    """
+    from diffusers.models import UNet1DModel as DiffusersUNet
+
+    def __init__(
+        self,
+        k: int,
+        dim: int,
+        activation: str = "swish",
+    ):
+        super().__init__()
+        self.diffusers_unet = self.DiffusersUNet(
+            sample_size=k,
+            in_channels=dim+2,
+            out_channels=dim,
+            block_out_channels=(64, 64,),
+            down_block_types=("DownBlock1D", "AttnDownBlock1D"),
+            up_block_types=("AttnUpBlock1D", "UpBlock1D"),
+            act_fn=activation,
+            norm_num_groups=8,
+        )
+
+    def forward(self, x: Tensor, t: Tensor, signal: Tensor) -> Tensor:
+        x = torch.cat([x, signal], dim=-1)
+        x = x.transpose(1, 2)
+        return self.diffusers_unet(x, t.squeeze(), return_dict=False)[0].transpose(1, 2)
+
+
 class GaussianFourierProjection(nn.Module):
     """
     Gaussian random features for encoding time steps.

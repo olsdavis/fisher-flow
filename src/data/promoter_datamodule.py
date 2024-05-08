@@ -45,14 +45,14 @@ class PromoterDesignDataModule(LightningDataModule):
 
     def prepare_data(self):
         """Nothing to download."""
-        self.data_train = PromoterDataset(split="train")
-        self.data_val = PromoterDataset(split="valid")
-        self.data_test = PromoterDataset(split="test")
 
     def setup(self, stage: str | None = None) -> None:
         """
         Load data. Set variables: `self.data_train`, `self.data_val`, `self.data_test`.
         """
+        self.data_train = PromoterDataset(split="train")
+        self.data_val = PromoterDataset(split="valid")
+        self.data_test = PromoterDataset(split="test")
         # Divide batch size by the number of devices.
         if self.trainer is not None:
             if self.hparams.batch_size % self.trainer.world_size != 0:
