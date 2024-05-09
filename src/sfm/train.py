@@ -5,6 +5,10 @@ from torch.func import jvp
 from src.sfm import Manifold, OTSampler
 
 
+def print_stats(x: Tensor, name: str):
+    print(f"{name}: {x.mean().item():.8f} ± {x.std().item():.8f}; min: {x.min().item():.8f}; max: {x.max().item():.8f}")
+
+
 def geodesic(manifold, start_point, end_point):
     # https://github.com/facebookresearch/riemannian-fm/blob/main/manifm/manifolds/utils.py#L6
     shooting_tangent_vec = manifold.logmap(start_point, end_point)
@@ -106,7 +110,11 @@ def cft_loss_function(
         out = model(x=x_t, signal=signal, t=t)
     else:
         out = model(x=x_t, t=t)
+    # from torch.nn import functional as F
     # if not m.all_belong_tangent(x_t, out):
+    # print_stats(m.square_norm_at(x_t, out), "output")
+    # print_stats(m.square_norm_at(x_t, target), "target")
+    # print_stats(F.cosine_similarity(x_t.reshape(x_t.size(0), -1), out.reshape(out.size(0), -1)), "cos")
 
     # assert m.all_belong_tangent(x_t, target)
     diff = out - target

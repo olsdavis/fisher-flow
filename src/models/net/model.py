@@ -622,6 +622,19 @@ class UNet1DModel(nn.Module):
         return self.diffusers_unet(x, t.squeeze(), return_dict=False)[0]
 
 
+
+class SimpleSineEmbedding(nn.Module):
+    def __init__(self, emb_size: int):
+        super().__init__()
+        self.emb_size = emb_size
+
+    def forward(self, x: Tensor) -> Tensor:
+        return torch.cat(
+            [torch.sin(x ** i) for i in range(1, self.emb_size + 1)],
+            dim=-1,
+        )
+
+
 class UNet1DSignal(nn.Module):
     """
     Adaptation of diffusers UNet1D.
@@ -635,11 +648,32 @@ class UNet1DSignal(nn.Module):
         activation: str = "swish",
         depth: int = 3,
         filters: int = 64,
+        sig_emb: int = 64,
+        time_emb_size: int = 16,
+        sig_size: int = 2,
+        batch_norm: bool = False,
     ):
         super().__init__()
+        self.sig_proj = nn.Sequential(
+            SimpleSineEmbedding(sig_emb // sig_size),
+        )
+        self.temb = SimpleSineEmbedding(time_emb_size)
+        if batch_norm:
+            self.time_sig = nn.Sequential(
+                nn.Linear(sig_emb + sig_size + time_emb_size, sig_emb),  # with time
+                nn.BatchNorm1d(sig_emb),
+                str_to_activation(activation),
+                nn.Linear(sig_emb, sig_emb),
+            )
+        else:
+            self.time_sig = nn.Sequential(
+                nn.Linear(sig_emb + sig_size + time_emb_size, sig_emb),  # with time
+                str_to_activation(activation),
+                nn.Linear(sig_emb, sig_emb),
+            )
         self.diffusers_unet = self.DiffusersUNet(
             sample_size=k,
-            in_channels=dim+2,
+            in_channels=dim+sig_emb,
             out_channels=dim,
             block_out_channels=(filters,) * depth,
             down_block_types=("DownBlock1D",) * depth,
@@ -649,6 +683,9 @@ class UNet1DSignal(nn.Module):
         )
 
     def forward(self, x: Tensor, t: Tensor, signal: Tensor) -> Tensor:
+        signal_proj = self.sig_proj(signal)
+        temb = self.temb(t).unsqueeze(1).expand(-1, x.size(1), -1)
+        signal = self.time_sig(torch.cat([signal, signal_proj, temb], dim=-1))
         x = torch.cat([x, signal], dim=-1)
         x = x.transpose(1, 2)
         return self.diffusers_unet(x, t.squeeze(), return_dict=False)[0].transpose(1, 2)
