@@ -1,10 +1,7 @@
 from typing import Any
 import pickle
 import os
-import numpy as np
 import torch
-import tqdm
-from torch import nn
 from torch.utils.data import DataLoader, Dataset, TensorDataset
 from lightning import LightningDataModule
 
@@ -17,7 +14,7 @@ class DNAEnhancerDataModule(LightningDataModule):
     def __init__(
         self,
         dataset: str = "MEL2",
-        data_dir: str = "data/enhancer/",
+        data_dir: str = "data/enhancer/the_code/General/data/Deep",
         train_val_test_split: tuple[int, int, int] = (55_000, 5_000, 10_000),
         batch_size: int = 64,
         num_workers: int = 0,
@@ -48,22 +45,27 @@ class DNAEnhancerDataModule(LightningDataModule):
 
     def prepare_data(self):
         """Prepare data."""
-        all_data = pickle.load(
-            open(os.path.join(self.hparams.data_dir, f"{self.dataset}.pkl"), "rb")
-        )
-        for split in ["train", "val", "test"]:
-            data = torch.from_numpy(all_data[f"{split}_data"])  # already one-hot encoded
-            dataset = TensorDataset(data)
-            setattr(
-                self,
-                f"data_{split}",
-                dataset
-            )
 
     def setup(self, stage: str | None = None) -> None:
         """
         Load data. Set variables: `self.data_train`, `self.data_val`, `self.data_test`.
         """
+        all_data = pickle.load(
+            open(f"{self.hparams.data_dir}{self.dataset}_data.pkl", "rb")
+        )
+        for split in ["train", "valid", "test"]:
+            data = torch.nn.functional.one_hot(
+                torch.from_numpy(all_data[f"{split}_data"]).argmax(dim=-1),
+                num_classes=4,
+            ).float()
+            clss = torch.from_numpy(all_data[f"y_{split}"]).argmax(dim=-1).float()
+            print(data.shape, clss.shape)
+            dataset = TensorDataset(data, clss)
+            setattr(
+                self,
+                f"data_{split}",
+                dataset
+            )
         # Divide batch size by the number of devices.
         if self.trainer is not None:
             if self.hparams.batch_size % self.trainer.world_size != 0:
@@ -90,9 +92,9 @@ class DNAEnhancerDataModule(LightningDataModule):
 
         :return: The validation dataloader.
         """
-        assert self.data_val
+        assert self.data_valid
         return DataLoader(
-            dataset=self.data_val,
+            dataset=self.data_valid,
             batch_size=self.batch_size_per_device,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,

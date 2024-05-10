@@ -27,6 +27,7 @@ model:
   net:
     k: ${data.k}
     dim: ${data.dim}
+    missing_coordinate: false
   compile: false
   manifold: "sphere"
   kl_eval: true

@@ -26,10 +26,10 @@ class ToyDataset(torch.utils.data.IterableDataset):
 
     def __iter__(self):
         while True:
-            sample = torch.multinomial(replacement=True, num_samples=1, input=self.probs)
+            sample = torch.multinomial(replacement=True, num_samples=1, input=self.probs).squeeze()
             one_hot = nn.functional.one_hot(sample, self.alphabet_size).float()
             # if there is a need to smooth labels, it is done in the model's training step
-            yield one_hot.squeeze()
+            yield one_hot.reshape((self.seq_len, self.alphabet_size))
 
 
 class ToyDFMDataModule(LightningDataModule):

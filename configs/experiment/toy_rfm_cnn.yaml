@@ -4,15 +4,15 @@
 # python train.py experiment=example
 
 defaults:
-  - override /data: promoter_design
-  - override /model: promoter_model
+  - override /data: toy_dfm
+  - override /model: rfm_cnn_model
   - override /callbacks: default
   - override /trainer: default
 
 # all parameters below will be merged with parameters from default configurations set above
 # this allows you to overwrite only specified parameters
 
-tags: ["promoter_design", "promoter_model"]
+tags: ["toy_dfm", "cnn"]
 
 seed: 12345
 
@@ -20,20 +20,29 @@ trainer:
   min_epochs: 1
   max_epochs: 1000
   gradient_clip_val: 1.0
+  num_sanity_val_steps: 0
 
 model:
-  compile: false
-  promoter_eval: true
+  optimizer:
+    lr: 0.001
   net:
-    mode: sfm  # just ignores the custom stuff
-  ot_method: None
-  inference_steps: 100
-  manifold: sphere
+    k: ${data.k}
+    dim: ${data.dim}
+    activation: lrelu
+  compile: false
+  kl_eval: true
+  # ema: true
+  # label_smoothing: 0.81
+
+data:
+  batch_size: 512
+  k: 4
+  dim: 100
 
 logger:
   wandb:
     tags: ${tags}
-    group: "promoter_design"
-    name: promoter_design_promdfm_B${data.batch_size}
+    group: "toy_dfm"
+    name: rfm_toy_dfm_${data.k}_${data.dim}
   aim:
-    experiment: "promoter_design"
+    experiment: "toy_dfm"

@@ -1,10 +1,4 @@
 from typing import Any
-import pickle
-import os
-import numpy as np
-import torch
-import tqdm
-from torch import nn
 from torch.utils.data import DataLoader, Dataset
 from lightning import LightningDataModule
 from .components.promoter_back import PromoterDataset
@@ -53,14 +47,14 @@ class PromoterDesignDataModule(LightningDataModule):
 
     def prepare_data(self):
         """Nothing to download."""
-        self.data_train = PromoterDataset(n_tsses=100000, rand_offset=10, split="train", sep_x_y=self.sep_x_y)
-        self.data_val = PromoterDataset(n_tsses=100000, rand_offset=0, split="valid", sep_x_y=self.sep_x_y)
-        self.data_test = PromoterDataset(n_tsses=100000, rand_offset=0, split="test", sep_x_y=self.sep_x_y)
 
     def setup(self, stage: str | None = None) -> None:
         """
         Load data. Set variables: `self.data_train`, `self.data_val`, `self.data_test`.
         """
+        self.data_train = PromoterDataset(n_tsses=100000, rand_offset=10, split="train", sep_x_y=self.sep_x_y)
+        self.data_val = PromoterDataset(n_tsses=100000, rand_offset=0, split="valid", sep_x_y=self.sep_x_y)
+        self.data_test = PromoterDataset(n_tsses=100000, rand_offset=0, split="test", sep_x_y=self.sep_x_y)
         # Divide batch size by the number of devices.
         if self.trainer is not None:
             if self.hparams.batch_size % self.trainer.world_size != 0:
