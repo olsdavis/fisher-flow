@@ -16,6 +16,10 @@ tags: ["promoter_design", "promoter_model"]
 
 seed: 12345
 
+callbacks:
+  model_checkpoint:
+    monitor: "val/sp-mse"
+
 trainer:
   min_epochs: 1
   max_epochs: 1000
