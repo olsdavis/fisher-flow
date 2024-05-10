@@ -22,15 +22,9 @@ from src.dfm import (
     simplex_proj,
     load_flybrain_designed_seqs,
 )
-from src.experiments.promoter_design import upgrade_state_dict, Sei
+from src.data.components.promoter_eval import Sei, upgrade_state_dict
 from src.models.net import PromoterModel
 
-
-"""
-test module import
-
-python -m src.models.dfm_module
-"""
 
 class DNAModule(pl.LightningModule):
     def __init__(
