@@ -613,8 +613,11 @@ if __name__ == "__main__":
     retrobridge_data = RetroBridgeDataModule()
     retrobridge_data.setup()
     train_loader = retrobridge_data.train_dataloader()
-    item = next(iter(train_loader))
-    print(item)
-    print(type(item))
-
-
+    mx = 0
+    for batch in train_loader:
+        mx = max(batch.x.size(0), mx)
+    for batch in retrobridge_data.val_dataloader():
+        mx = max(batch.x.size(0), mx)
+    for batch in retrobridge_data.test_dataloader():
+        mx = max(batch.x.size(0), mx)
+    print(mx)

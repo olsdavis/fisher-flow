@@ -68,6 +68,7 @@ class SFMModule(LightningModule):
         self.val_loss = MeanMetric()
         self.test_loss = MeanMetric()
         self.sp_mse = MeanMetric()
+        self.test_sp_mse = MeanMetric()
         self.min_grad = MinMetric()
         self.max_grad = MaxMetric()
         self.mean_grad = MeanMetric()
@@ -116,6 +117,8 @@ class SFMModule(LightningModule):
         """
         if isinstance(x_1, list):
             x_1, signal = x_1
+            # Only one of the two signal inputs is used (the first one)
+            signal = signal[:, :, 0].unsqueeze(-1)
             loss = self.model_step(x_1, signal)
         else:
             loss = self.model_step(x_1)
@@ -139,6 +142,8 @@ class SFMModule(LightningModule):
         """
         if isinstance(x_1, list):
             x_1, signal = x_1
+            # Only one of the two signal inputs is used (the first one)
+            signal = signal[:, :, 0].unsqueeze(-1)
             loss = self.model_step(x_1, signal)
         else:
             loss = self.model_step(x_1)
@@ -147,16 +152,7 @@ class SFMModule(LightningModule):
         self.val_loss(loss)
         self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
         if self.promoter_eval:
-            eval_model = partial(self.net, signal=signal)
-            pred = self.manifold.tangent_euler(
-                self.manifold.uniform_prior(*x_1.shape[:-1], 4).to(x_1.device),
-                eval_model,
-                steps=self.inference_steps,
-                tangent=self.tangent_euler,
-            )
-            mx = torch.argmax(pred, dim=-1)
-            one_hot = F.one_hot(mx, num_classes=4)
-            mse = SeiEval().eval_sp_mse(one_hot, x_1, batch_idx)
+            mse = self.compute_sp_mse(x_1, signal, batch_idx)
             self.sp_mse(mse)
             self.log("val/sp-mse", self.sp_mse, on_step=False, on_epoch=True, prog_bar=True)
 
@@ -186,6 +182,8 @@ class SFMModule(LightningModule):
         """
         if isinstance(x_1, list):
             x_1, signal = x_1
+            # Only one of the two signal inputs is used (the first one)
+            signal = signal[:, :, 0].unsqueeze(-1)
             loss = self.model_step(x_1, signal)
         else:
             loss = self.model_step(x_1)
@@ -193,6 +191,10 @@ class SFMModule(LightningModule):
         # update and log metrics
         self.test_loss(loss)
         self.log("test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True)
+        if self.promoter_eval:
+            mse = self.compute_sp_mse(x_1, signal)
+            self.test_sp_mse(mse)
+            self.log("test/sp-mse", self.test_sp_mse, on_step=False, on_epoch=True, prog_bar=True)
 
     def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
         if self.debug_grads:
@@ -218,6 +220,26 @@ class SFMModule(LightningModule):
                 tangent=self.tangent_euler,
             )
             self.log("test/kl", kl, on_step=False, on_epoch=True, prog_bar=False)
+
+    def compute_sp_mse(
+        self,
+        x_1: torch.Tensor,
+        signal: torch.Tensor,
+        batch_idx: int | None = None,
+    ) -> torch.Tensor:
+        """
+        Computes the model's SP MSE.
+        """
+        eval_model = partial(self.net, signal=signal)
+        pred = self.manifold.tangent_euler(
+            self.manifold.uniform_prior(*x_1.shape[:-1], 4).to(x_1.device),
+            eval_model,
+            steps=self.inference_steps,
+            tangent=self.tangent_euler,
+        )
+        mx = torch.argmax(pred, dim=-1)
+        one_hot = F.one_hot(mx, num_classes=4)
+        return SeiEval().eval_sp_mse(seq_one_hot=one_hot, target=x_1, b_index=batch_idx)
 
     def optimizer_step(self, *args, **kwargs):
         super().optimizer_step(*args, **kwargs)
