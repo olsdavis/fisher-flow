@@ -26,6 +26,9 @@ model:
   promoter_eval: true
   net:
     mode: sfm  # just ignores the custom stuff
+  ot_method: None
+  inference_steps: 100
+  manifold: sphere
 
 logger:
   wandb:

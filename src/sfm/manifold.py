@@ -533,7 +533,7 @@ class GeooptSphere(Manifold):
         return self.sphere.logmap(p, q)
 
     def geodesic_distance(self, p: Tensor, q: Tensor) -> Tensor:
-        return self.sphere.dist2(p, q).sum(dim=1).sqrt()
+        return self.sphere.dist2(p, q).sum(dim=-1).sqrt()
 
     def metric(self, x: Tensor, u: Tensor, v: Tensor) -> Tensor:
         return self.sphere.inner(x, u, v)

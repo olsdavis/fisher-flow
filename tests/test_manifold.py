@@ -1,9 +1,9 @@
 """Testing manifolds."""
 import unittest
 import torch
-from torch import nn, testing
+from torch import testing
 from src.models.net import BestMLP
-from src.sfm import NSimplex, NSphere, set_seeds
+from src.sfm import GeooptSphere, NSimplex, NSphere, set_seeds
 
 
 class TestNSimplex(unittest.TestCase):
@@ -52,41 +52,44 @@ class TestNSimplex(unittest.TestCase):
 
 class TestNSphere(unittest.TestCase):
     """Tests n-spheres."""
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.spheres = [NSphere(), GeooptSphere()]
 
     @torch.no_grad()
     def test_n_sphere_exp_log_basic(self):
         """
         Tests whether the log and exp map are defined correctly.
         """
-        m = NSphere()
-        x_0 = torch.Tensor([[[0.5, 0.5, 0.5, 0.5]]])
-        x_1 = torch.Tensor([[[0.20, 0.20, 0.50, 0.10]]]).sqrt()
-        back = m.exp_map(x_0, m.log_map(x_0, x_1))
-        testing.assert_close(back, x_1)
+        for m in self.spheres:
+            x_0 = torch.Tensor([[[0.5, 0.5, 0.5, 0.5]]])
+            x_1 = torch.Tensor([[[0.20, 0.20, 0.50, 0.10]]]).sqrt()
+            back = m.exp_map(x_0, m.log_map(x_0, x_1))
+            testing.assert_close(back, x_1)
 
     @torch.no_grad()
     def test_n_sphere_geodesic_distance(self):
         """
         Tests whether the geodesic distance is correct.
         """
-        m = NSphere()
-        x_0 = torch.Tensor([[[1.0, 0.0]]])
-        x_1 = torch.Tensor([[[0.0, 1.0]]])
-        dist = m.geodesic_distance(x_0, x_1)
-        testing.assert_close(dist.squeeze(), torch.tensor(torch.pi / 2.0))
+        for m in self.spheres:
+            x_0 = torch.Tensor([[[1.0, 0.0]]])
+            x_1 = torch.Tensor([[[0.0, 1.0]]])
+            dist = m.geodesic_distance(x_0, x_1)
+            testing.assert_close(dist.squeeze(), torch.tensor(torch.pi / 2.0))
 
     @torch.no_grad()
     def test_n_sphere_make_tangent(self):
         """
         Tests whether the make_tangent function is correct.
         """
-        m = NSphere()
-        x = torch.Tensor([[[0.5, 0.5, 0.5, 0.5]]])
-        v = torch.Tensor([[[0.1, 0.2, 0.3, 0.1]]])
-        tangent = m.make_tangent(x, v)
-        testing.assert_close(
-            (tangent * x).sum(), torch.tensor(0.0),
-        )
+        for m in self.spheres:
+            x = torch.Tensor([[[0.5, 0.5, 0.5, 0.5]]])
+            v = torch.Tensor([[[0.1, 0.2, 0.3, 0.1]]])
+            tangent = m.make_tangent(x, v)
+            testing.assert_close(
+                (tangent * x).sum(), torch.tensor(0.0),
+            )
 
     @torch.no_grad()
     def test_n_sphere_parallel_transport(self):
@@ -94,26 +97,26 @@ class TestNSphere(unittest.TestCase):
         Tests the parallel transport function.
         """
         set_seeds(4)
-        m = NSphere()
-        p = m.uniform_prior(500, 16, 10)
-        v = m.make_tangent(p, torch.randn(500, 16, 10))
-        assert m.all_belong_tangent(p, v), "not tangent initially"
-        testing.assert_close(
-            m.parallel_transport(p, p, v),
-            v,
-        )
+        for m in self.spheres:
+            p = m.uniform_prior(500, 16, 10)
+            v = m.make_tangent(p, torch.randn(500, 16, 10))
+            assert m.all_belong_tangent(p, v), "not tangent initially"
+            testing.assert_close(
+                m.parallel_transport(p, p, v),
+                v,
+            )
 
     @torch.no_grad()
     def test_geodesic_interpolant(self):
         """
         Tests the precision of geodesic interpolants.
         """
-        m = NSphere()
-        x_0 = torch.Tensor([[[0.0, 1.0]]])
-        x_1 = torch.Tensor([[[1.0, 0.0]]]).sqrt()
-        t = torch.Tensor([[0.5]])
-        x_t = m.geodesic_interpolant(x_0, x_1, t)
-        testing.assert_close(x_t, torch.Tensor([[[0.5, 0.5]]]).sqrt())
+        for m in self.spheres:
+            x_0 = torch.Tensor([[[0.0, 1.0]]])
+            x_1 = torch.Tensor([[[1.0, 0.0]]]).sqrt()
+            t = torch.Tensor([[0.5]])
+            x_t = m.geodesic_interpolant(x_0, x_1, t)
+            testing.assert_close(x_t, torch.Tensor([[[0.5, 0.5]]]).sqrt())
 
     @torch.no_grad()
     def test_tangent_euler_remains_on_sphere(self):
@@ -121,21 +124,21 @@ class TestNSphere(unittest.TestCase):
         Tests whether the Tangent Euler method remains on the sphere
         """
         set_seeds(101)
-        m = NSphere()
-        k = 10
-        d = 100
-        x_0 = m.uniform_prior(1024, k, d)
-        model = BestMLP(d, k, 128, 2, 2, "lrelu")
-        self.assertTrue(
-            m.all_belong(
-                m.tangent_euler(
-                    x_0,
-                    model,
-                    steps=100,
-                )
-            ),
-            "must remain on sphere",
-        )
+        for m in self.spheres:
+            k = 10
+            d = 100
+            x_0 = m.uniform_prior(1024, k, d)
+            model = BestMLP(d, k, 128, 2, 2, "lrelu")
+            self.assertTrue(
+                m.all_belong(
+                    m.tangent_euler(
+                        x_0,
+                        model,
+                        steps=100,
+                    )
+                ),
+                "must remain on sphere",
+            )
 
     @torch.no_grad()
     def test_log_edge_cases(self):
@@ -162,6 +165,7 @@ class TestManifoldsGeneral(unittest.TestCase):
         self.manifolds = [
             NSimplex(),
             NSphere(),
+            GeooptSphere(),
         ]
 
     @torch.no_grad()
@@ -249,6 +253,7 @@ class TestManifoldsGeneral(unittest.TestCase):
                     rtol=1e-6,
                 )
 
+    @torch.no_grad()
     def test_midinterpolant(self):
         """
         Tests whether the midpoint of a geodesic is equidistant to both
@@ -266,6 +271,7 @@ class TestManifoldsGeneral(unittest.TestCase):
                 rtol=1e-5,
             )
 
+    @torch.no_grad()
     def test_zero_interpolant(self):
         """
         Tests end points of geodesic interpolant.
@@ -278,6 +284,24 @@ class TestManifoldsGeneral(unittest.TestCase):
             testing.assert_close(z, x)
             w = manifold.geodesic_interpolant(x, y, torch.ones((500, 1)))
             testing.assert_close(w, y)
+
+    @torch.no_grad()
+    def test_pairwise_geodesic_distance(self):
+        """
+        Tests whether pairwise geodesic distance entries correspond
+        to what they should. 
+        """
+        for manifold in [GeooptSphere()]:
+            set_seeds(5)
+            x = manifold.uniform_prior(500, self.seq_len, self.dim)
+            y = manifold.uniform_prior(500, self.seq_len, self.dim)
+            dist = manifold.pairwise_geodesic_distance(x, y)
+            for i in range(100):
+                for j in range(100):
+                    testing.assert_close(
+                        dist[i, j],
+                        manifold.geodesic_distance(x[i], y[j])**2,
+                    )
 
 
 if __name__ == "__main__":

@@ -27,7 +27,13 @@ model:
   net:
     k: 1024
     dim: 4
+    sig_emb: 128
+    batch_norm: false
+    time_emb_size: 32
+    depth: 5
+    filters: 128
   manifold: sphere
+  # label_smoothing: 0.81
   compile: false
   promoter_eval: true
   inference_steps: 100
