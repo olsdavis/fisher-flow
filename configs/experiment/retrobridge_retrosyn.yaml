@@ -4,48 +4,41 @@
 # python train.py experiment=example
 
 defaults:
-  - override /data: toy_dfm
-  - override /model: toy_cnn_sfm
-  - override /callbacks: default
+  - override /data: retrobridge # points to a yaml file
+  - override /model: retrobridge_retrosyn # points to a yaml file
+  - override /callbacks: retrobridge
   - override /trainer: default
 
 # all parameters below will be merged with parameters from default configurations set above
 # this allows you to overwrite only specified parameters
 
-tags: ["toy_dfm", "cnn"]
+# first tag is the data set, second tag is the model
+tags: ["retrosyn", "retro_bridge"]
 
-seed: 12345
+seed: 12347
 
 trainer:
   min_epochs: 1
   max_epochs: 1000
   gradient_clip_val: 1.0
+  num_sanity_val_steps: 0
   accelerator: 'gpu'
   devices: [0]
 
 model:
   optimizer:
-    lr: 0.001
+    lr: 0.0001
   net:
-    k: ${data.k}
-    dim: ${data.dim}
-    activation: lrelu
   compile: false
-  manifold: sphere
-  kl_eval: true
-  ema: true
-  # label_smoothing: 0.81
 
 data:
-  batch_size: 512
-  k: 4
-  dim: 100
+  batch_size: 64
 
 logger:
   wandb:
     project: sfm
     tags: ${tags}
-    group: "toy_dfm"
-    name: "toy_cnn_sfm"
+    group: retrosyn
+    name: retrobridge_retro_syn_s12347
   aim:
-    experiment: "toy_dfm"
+    experiment: test_exp

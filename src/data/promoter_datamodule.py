@@ -1,14 +1,13 @@
 from typing import Any
-import pickle
-import os
-import numpy as np
-import torch
-import tqdm
-from torch import nn
 from torch.utils.data import DataLoader, Dataset
 from lightning import LightningDataModule
 from .components.promoter_back import PromoterDataset
 
+"""
+test module loading:
+
+python -m src.data.promoter_datamodule
+"""
 
 class PromoterDesignDataModule(LightningDataModule):
     """
@@ -22,6 +21,7 @@ class PromoterDesignDataModule(LightningDataModule):
         batch_size: int = 64,
         num_workers: int = 0,
         pin_memory: bool = False,
+        sep_x_y: bool = False,
     ):
         """Initialize a `PromoterDesignDataModule`.
 
@@ -43,6 +43,8 @@ class PromoterDesignDataModule(LightningDataModule):
 
         self.batch_size_per_device = batch_size
 
+        self.sep_x_y = sep_x_y # whether to separate x and y in the dataset
+
     def prepare_data(self):
         """Nothing to download."""
 
@@ -50,9 +52,9 @@ class PromoterDesignDataModule(LightningDataModule):
         """
         Load data. Set variables: `self.data_train`, `self.data_val`, `self.data_test`.
         """
-        self.data_train = PromoterDataset(split="train")
-        self.data_val = PromoterDataset(split="valid")
-        self.data_test = PromoterDataset(split="test")
+        self.data_train = PromoterDataset(n_tsses=100000, rand_offset=10, split="train", sep_x_y=self.sep_x_y)
+        self.data_val = PromoterDataset(n_tsses=100000, rand_offset=0, split="valid", sep_x_y=self.sep_x_y)
+        self.data_test = PromoterDataset(n_tsses=100000, rand_offset=0, split="test", sep_x_y=self.sep_x_y)
         # Divide batch size by the number of devices.
         if self.trainer is not None:
             if self.hparams.batch_size % self.trainer.world_size != 0:
@@ -70,6 +72,7 @@ class PromoterDesignDataModule(LightningDataModule):
         return DataLoader(
             dataset=self.data_train,
             batch_size=self.batch_size_per_device,
+            shuffle=True,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
         )
@@ -131,4 +134,5 @@ if __name__ == "__main__":
     mod.setup()
     data_loader = mod.train_dataloader()
     x = next(iter(data_loader))
-    print(print(x[0, :25]))
+    print(type(x))
+    print([item.shape for item in x])

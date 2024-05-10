@@ -75,9 +75,9 @@ class RetroBridgeDatasetInfos:
         }
 
         if datamodule.extra_nodes:
-            info_dir = f'{datamodule.data_root}/info_retrobridge_extra_nodes'
+            info_dir = f'{datamodule.data_dir}/info_retrobridge_extra_nodes'
         else:
-            info_dir = f'{datamodule.data_root}/info_retrobridge'
+            info_dir = f'{datamodule.data_dir}/info_retrobridge'
 
         os.makedirs(info_dir, exist_ok=True)
 
@@ -524,7 +524,7 @@ class RetroBridgeDataModule(MolecularDataModule):
         self.swap = swap
         self.extra_nodes = extra_nodes
 
-        self.train_smiles = []
+        self.setup(stage="train")
 
     def prepare_data(self):
         """Nothing to download."""
@@ -545,53 +545,46 @@ class RetroBridgeDataModule(MolecularDataModule):
         # load and split datasets only if not loaded already
         stage = 'val' if self.evaluation else 'train'
         if not self.data_train and not self.data_val and not self.data_test:
-            self.data_train = RetroBridgeDataset(stage=stage, root=self.data_dir, extra_nodes=self.extra_nodes, swap=self.swap)
-            self.data_val = RetroBridgeDataset(stage='val', root=self.data_dir, extra_nodes=self.extra_nodes, swap=self.swap)
-            self.data_test = RetroBridgeDataset(stage='test', root=self.data_dir, extra_nodes=self.extra_nodes, swap=self.swap)
-        
-        self.train_smiles = self.data_train.r_smiles
+            datasets = {
+            'train' : RetroBridgeDataset(stage=stage, root=self.data_dir, extra_nodes=self.extra_nodes, swap=self.swap),
+            'val' : RetroBridgeDataset(stage='val', root=self.data_dir, extra_nodes=self.extra_nodes, swap=self.swap),
+            'test' : RetroBridgeDataset(stage='test', root=self.data_dir, extra_nodes=self.extra_nodes, swap=self.swap),
+        }
+        self.dataloaders = {}
+        for split, dataset in datasets.items():
+            self.dataloaders[split] = DataLoader(
+                dataset=dataset,
+                batch_size=self.batch_size_per_device,
+                num_workers=self.hparams.num_workers,
+                pin_memory=self.hparams.pin_memory,
+                shuffle=self.shuffle,
+            )
+
+        self.train_smiles = datasets['train'].r_smiles
 
     def train_dataloader(self) -> DataLoader:
         """Create and return the train dataloader.
 
         :return: The train dataloader.
         """
-        assert self.data_train
-        return DataLoader(
-            dataset=self.data_train,
-            batch_size=self.batch_size_per_device,
-            num_workers=self.hparams.num_workers,
-            pin_memory=self.hparams.pin_memory,
-            shuffle=self.shuffle,
-        )
+        #assert self.data_train
+        return self.dataloaders['train']
 
     def val_dataloader(self) -> DataLoader:
         """Create and return the validation dataloader.
 
         :return: The validation dataloader.
         """
-        assert self.data_val
-        return DataLoader(
-            dataset=self.data_val,
-            batch_size=self.batch_size_per_device,
-            num_workers=self.hparams.num_workers,
-            pin_memory=self.hparams.pin_memory,
-            shuffle=False,
-        )
+        #assert self.data_val
+        return self.dataloaders['val']
 
     def test_dataloader(self) -> DataLoader:
         """Create and return the test dataloader.
 
         :return: The test dataloader.
         """
-        assert self.data_test
-        return DataLoader(
-            dataset=self.data_test,
-            batch_size=self.batch_size_per_device,
-            num_workers=self.hparams.num_workers,
-            pin_memory=self.hparams.pin_memory,
-            shuffle=False,
-        )
+        #assert self.data_test
+        return self.dataloaders['test']
 
     def teardown(self, stage: str | None = None):
         """Lightning hook for cleaning up after `trainer.fit()`, `trainer.validate()`,

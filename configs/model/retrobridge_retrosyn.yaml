@@ -1,0 +1,60 @@
+_target_: src.models.RetroBridgeModule
+
+# Net params
+model:
+  _target_: src.models.net.GraphTransformer
+  n_layers: 5
+  input_dims: {'X': 40, 'E': 10, 'y': 12}
+  hidden_mlp_dims: {'X': 256, 'E': 128, 'y': 128}
+  hidden_dims: {'dx': 256, 'de': 64, 'dy': 64, 'n_head': 8, 'dim_ffX': 256, 'dim_ffE': 128, 'dim_ffy': 128}
+  output_dims: {'X': 17, 'E': 5, 'y': 0}
+  act_fn_in: relu
+  act_fn_out: relu
+  addition: True
+
+optimizer:
+  _target_: torch.optim.AdamW
+  _partial_: true
+  lr: 0.001
+  weight_decay: 0.0
+  amsgrad: true
+
+scheduler: null
+
+extra_features: all
+extra_molecular_features: false
+use_context: True
+
+# Generals
+experiment_name: retrobridge
+checkpoints: checkpoints
+logs: logs
+#data: data
+#wandb_entity: sam-k
+#seed: 42
+#device: gpu
+
+# Diffusion
+diffusion_steps: 500
+diffusion_noise_schedule: cosine
+transition: null
+fix_product_nodes: True
+
+# Training
+#n_epochs: 1 #1000
+lambda_train: [5, 0]
+lr: 0.0002
+weight_decay: 0.000000000001
+loss_type: vlb
+
+# Settings
+sample_every_val: 20
+log_every_steps: 50
+samples_to_generate: 128
+samples_to_save: 128
+samples_per_input: 5
+chains_to_save: 5
+number_chain_steps_to_save: 50
+#enable_progress_bar: True
+
+compile: false

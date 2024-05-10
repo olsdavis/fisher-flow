@@ -54,7 +54,7 @@ class PromoterModel(nn.Module):
         n = 256
         expanded_simplex_input = (mode == 'dirichlet' or mode == 'riemannian')
         # NOTE: change +1 to +2 here, at the end of the line
-        inp_size = self.alphabet_size * (2 if expanded_simplex_input else 1) + 2 # plus one for signal input
+        inp_size = self.alphabet_size * (2 if expanded_simplex_input else 1) + 1 # plus one for signal input
         if (mode == 'ardm' or mode == 'lrar'):
             inp_size += 1  # plus one for the mask token of these models
         self.linear = nn.Conv1d(inp_size, n, kernel_size=9, padding=4)
