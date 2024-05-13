@@ -580,10 +580,6 @@ class GeooptSphere(Manifold):
         return self.sphere.projx(x).abs()
 
 
-class GeomStatsSphere(Manifold):
-    pass
-
-
 class LinearNSimplex(NSimplex):
     def exp_map(self, p: Tensor, v: Tensor) -> Tensor:
         return p + v

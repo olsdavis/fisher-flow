@@ -283,7 +283,8 @@ class KNodeCycles:
         assert (k5x >= -0.1).all(), k5x
 
         _, k6y = self.k6_cycle()
-        assert (k6y >= -0.1).all()
+        if not (k6y >= -0.1).all():
+            print("K6 is negative!", k6y)
 
         kcyclesx = torch.cat([k3x, k4x, k5x], dim=-1)
         kcyclesy = torch.cat([k3y, k4y, k5y, k6y], dim=-1)

@@ -1,12 +1,15 @@
 from functools import partial
 from typing import Any
 import torch
+from torch import vmap
+from torch.func import jvp
 from torch.nn import functional as F
+from torch.optim.optimizer import Optimizer
 from lightning import LightningModule
 from lightning.pytorch.utilities import grad_norm
-from torch.optim.optimizer import Optimizer
 from torchmetrics import MeanMetric, MinMetric, MaxMetric
 from torch_ema import ExponentialMovingAverage
+from torch_geometric.data import Batch
 
 
 from src.sfm import (
@@ -17,6 +20,26 @@ from src.sfm import (
 )
 from src.models.net import TangentWrapper
 from src.data.components.promoter_eval import SeiEval
+from src.data import RetroBridgeDatasetInfos, PlaceHolder, retrobridge_utils
+from src.experiments.retrosynthesis import ExtraFeatures, ExtraMolecularFeatures, DummyExtraFeatures
+
+
+def geodesic(manifold, start_point, end_point):
+    # https://github.com/facebookresearch/riemannian-fm/blob/main/manifm/manifolds/utils.py#L6
+    shooting_tangent_vec = manifold.logmap(start_point, end_point)
+
+    def path(t):
+        """Generate parameterized function for geodesic curve.
+        Parameters
+        ----------
+        t : array-like, shape=[n_points,]
+            Times at which to compute points of the geodesics.
+        """
+        tangent_vecs = torch.einsum("i,...k->...ik", t, shooting_tangent_vec)
+        points_at_time_t = manifold.expmap(start_point.unsqueeze(-2), tangent_vecs)
+        return points_at_time_t
+
+    return path
 
 
 class SFMModule(LightningModule):
@@ -41,6 +64,18 @@ class SFMModule(LightningModule):
         tangent_euler: bool = True,
         debug_grads: bool = False,
         inference_steps: int = 100,
+        datamodule: Any = None,  # in retrobridge
+        # retobridge parameters:
+        input_dims: dict = {'X': 40, 'E': 10, 'y': 12},
+        output_dims: dict = {'X': 17, 'E': 5, 'y': 0},
+        transition: str = None,
+        extra_features: str = "all",
+        extra_molecular_features: bool = False,
+        use_context: bool = True,
+        number_chain_steps_to_save: int = 50,
+        chains_to_save: int = 5,
+        fix_product_nodes: bool = True,
+        lambda_train: list[int] = [5, 0],
     ) -> None:
         """
         :param net: The model to train.
@@ -57,7 +92,8 @@ class SFMModule(LightningModule):
         self.tangent_euler = tangent_euler
         self.promoter_eval = promoter_eval
         self.manifold = manifold_from_name(manifold)
-        self.net = TangentWrapper(self.manifold, net).to(self.device)
+        # don't wrap for retrobridge!
+        self.net = TangentWrapper(self.manifold, net).to(self.device) if not datamodule else net
         if ema:
             self.ema = ExponentialMovingAverage(self.net.parameters(), decay=ema_decay).to(self.device)
         else:
@@ -76,6 +112,38 @@ class SFMModule(LightningModule):
         self.kl_samples = kl_samples
         self.debug_grads = debug_grads
         self.inference_steps = inference_steps
+        self.retrobridge = datamodule is not None
+
+        # retrobridge variables
+        self.input_dims = input_dims
+        self.output_dims = output_dims
+        self.transition = transition
+        self.extra_features = extra_features
+        self.extra_molecular_features = extra_molecular_features
+        self.use_context = use_context
+        self.number_chain_steps_to_save = number_chain_steps_to_save
+        self.chains_to_save = chains_to_save
+        self.fix_product_nodes = fix_product_nodes
+        self.lambda_train = lambda_train
+        if datamodule is not None:
+            self.dataset_infos = RetroBridgeDatasetInfos(datamodule)
+            self.extra_features = (
+                ExtraFeatures(extra_features, dataset_info=self.dataset_infos)
+                if extra_features is not None
+                else DummyExtraFeatures()
+            )
+            self.domain_features = (
+                ExtraMolecularFeatures(dataset_infos=self.dataset_infos)
+                if extra_molecular_features
+                else DummyExtraFeatures()
+            )
+            self.dataset_infos.compute_input_output_dims(
+                datamodule=datamodule,
+                extra_features=self.extra_features,
+                domain_features=self.domain_features,
+                use_context=use_context,
+            )
+
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Perform a forward pass through the model `self.net`."""
@@ -105,8 +173,124 @@ class SFMModule(LightningModule):
             closed_form_drv=False,
         )[0]
 
+    def retrobridge_step(
+        self, data: Batch,
+    ) -> torch.Tensor:
+        """
+        Performs a step on retrobridge data, returns loss.
+        """
+        # Getting graphs of reactants (target) and product (context)
+        reactants, r_node_mask = retrobridge_utils.to_dense(
+            data.x, data.edge_index, data.edge_attr, data.batch,
+        )
+        reactants = reactants.mask(r_node_mask)
+
+        product, p_node_mask = retrobridge_utils.to_dense(
+            data.p_x, data.p_edge_index, data.p_edge_attr, data.batch,
+        )
+        #retrobridge_utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)[0].E.sum(dim=-1)
+        product = product.mask(p_node_mask)
+
+        t = torch.rand(data.batch_size, 1, device=data.x.device)
+
+        # product is prior, reactants is targret
+        # now, need to train over product of these buggers
+
+        # encode no edges as 1 in last dimension
+        start_e = self.encode_empty_cat(product.E)
+        end_e = self.encode_empty_cat(reactants.E)
+        edges_t, edges_target = self.compute_target(
+            start_e,
+            end_e,
+            t,
+        )
+        # same for features
+        start_f = self.encode_empty_cat(product.X)
+        end_f = self.encode_empty_cat(reactants.X)
+        feats_t, feats_target = self.compute_target(
+            start_f,
+            end_f,
+            t,
+        )
+        noisy_data = {
+            "t": t,
+            "E_t": edges_t[:, :, :, :-1],  # remove last item
+            "X_t": feats_t[:, :, :-1],  # remove last item
+            "y": product.y,
+            "y_t": product.y,
+            "node_mask": r_node_mask,
+        }
+
+        # Computing extra features + context and making predictions
+        context = product.clone() if self.use_context else None
+        extra_data = self.compute_extra_data(noisy_data, context=context)
+
+        pred = self.retrobridge_forward(noisy_data, extra_data, r_node_mask)
+        # have two targets, need two projections
+        loss_x = (self.manifold.make_tangent(feats_t, pred.X, missing_coordinate=True) - feats_target).square().sum(dim=(-1, -2))
+        # reshape for B, K, D shape
+        edges_t = edges_t.reshape(edges_t.size(0), -1, edges_t.size(-1))
+        pred_reshaped = pred.E.reshape(pred.E.size(0), -1, pred.E.size(-1))
+        loss_edges = (
+            self.manifold.make_tangent(edges_t, pred_reshaped, missing_coordinate=True) - edges_target.reshape_as(edges_t)
+        ).square().sum(dim=(-1, -2))
+        loss = (loss_x + loss_edges).mean()
+        return loss
+
+    def retrobridge_forward(self, noisy_data: dict[str, Any], extra_data: PlaceHolder, node_mask: torch.Tensor) -> torch.Tensor:
+        X = torch.cat((noisy_data['X_t'], extra_data.X), dim=2).float()
+        E = torch.cat((noisy_data['E_t'], extra_data.E), dim=3).float()
+        y = torch.hstack((noisy_data['y_t'], extra_data.y)).float()
+        return self.net(X, E, y, node_mask)
+
+    def encode_empty_cat(self, tensor: torch.Tensor) -> torch.Tensor:
+        """
+        Encodes no category as a feature in the last coordinate.
+        """
+        no_cat_pad = torch.zeros(*tensor.shape[:-1], 1).to(tensor)
+        no_cat_pad[tensor.sum(dim=-1) == 0] = 1
+        return torch.cat([no_cat_pad, tensor], dim=-1)
+
+    def compute_extra_data(self, noisy_data, context=None, condition_on_t=True):
+        """ At every training step (after adding noise) and step in sampling, compute extra information and append to
+            the network input. """
+
+        extra_features = self.extra_features(noisy_data)
+        extra_molecular_features = self.domain_features(noisy_data)
+
+        extra_X = torch.cat((extra_features.X, extra_molecular_features.X), dim=-1)
+        extra_E = torch.cat((extra_features.E, extra_molecular_features.E), dim=-1)
+        extra_y = torch.cat((extra_features.y, extra_molecular_features.y), dim=-1)
+
+        if context is not None:
+            extra_X = torch.cat((extra_X, context.X), dim=-1)
+            extra_E = torch.cat((extra_E, context.E), dim=-1)
+
+        if condition_on_t:
+            t = noisy_data['t']
+            extra_y = torch.cat((extra_y, t), dim=1)
+        return PlaceHolder(X=extra_X, E=extra_E, y=extra_y)
+
+    def compute_target(
+        self,
+        x_0: torch.Tensor,
+        x_1: torch.Tensor,
+        t: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        with torch.inference_mode(False):
+            # https://github.com/facebookresearch/riemannian-fm/blob/main/manifm/model_pl.py
+            def cond_u(x0, x1, t):
+                path = geodesic(self.manifold.sphere, x0, x1)
+                x_t, u_t = jvp(path, (t,), (torch.ones_like(t).to(t),))
+                return x_t, u_t
+            x_t, target = vmap(cond_u)(x_0, x_1, t)
+        x_t = x_t.squeeze()
+        target = target.squeeze()
+        # assert self.manifold.all_belong_tangent(x_t, target)
+        return x_t, target
+
     def training_step(
-        self, x_1: torch.Tensor | list[torch.Tensor], batch_idx: int,
+        self, x_1: torch.Tensor | list[torch.Tensor] | Batch, batch_idx: int,
     ) -> torch.Tensor:
         """Perform a single training step on a batch of data from the training set.
 
@@ -120,6 +304,8 @@ class SFMModule(LightningModule):
             # Only one of the two signal inputs is used (the first one)
             signal = signal[:, :, 0].unsqueeze(-1)
             loss = self.model_step(x_1, signal)
+        elif isinstance(x_1, Batch):
+            loss = self.retrobridge_step(x_1)
         else:
             loss = self.model_step(x_1)
 
