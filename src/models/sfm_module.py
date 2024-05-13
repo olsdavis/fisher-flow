@@ -306,7 +306,7 @@ class SFMModule(LightningModule):
         return x_t, target
     
     def retrobridge_eval(self):
-        """Sampling for retrobridge."""
+        """Evaluation metrics for retrobridge."""
         samples_left_to_generate = self.samples_to_generate
 
         samples = []
@@ -358,11 +358,11 @@ class SFMModule(LightningModule):
         for metric_name, metric in to_log.items():
             self.log(metric_name, metric)
 
-        to_log = self.sampling_metrics(samples)
+        to_log = self.val_molecular_metrics(samples)
         for metric_name, metric in to_log.items():
             self.log(metric_name, metric)
 
-        self.sampling_metrics.reset()
+        self.val_molecular_metrics.reset()
 
     def sample_molecule(
         self,
@@ -382,6 +382,9 @@ class SFMModule(LightningModule):
         # do joint tangent Euler method
         dt = torch.tensor(1.0 / self.inference_steps, device=data.x.device)
         t = torch.zeros(data.batch_size, 1, device=data.x.device)
+        context = product.clone() if self.use_context else None
+        orig_edge_shape = E.shape
+        # start!
         for _ in range(self.inference_steps):
             noisy_data = {
                 "t": t,
@@ -391,19 +394,27 @@ class SFMModule(LightningModule):
                 "y_t": product.y,
                 "node_mask": node_mask,
             }
-            extra_data = self.compute_extra_data(noisy_data, context=None)
+            extra_data = self.compute_extra_data(noisy_data, context=context)
             pred = self.retrobridge_forward(noisy_data, extra_data, node_mask)
             # put on simplex
             E = self.encode_empty_cat(pred.E)
             X = self.encode_empty_cat(pred.X)
+            # prep
+            target_edge_shape = (E.size(0), -1, E.size(-1))
             # make a step
             X = self.manifold.exp_map(
                 X, self.manifold.make_tangent(X, pred.X, missing_coordinate=True) * dt,
             )[:, :, :-1]
+            E = E.reshape(target_edge_shape)
             E = self.manifold.exp_map(
                 E,
-                self.manifold.make_tangent(E, pred.E, missing_coordinate=True) * dt,
-            )[:, :, :, :-1]
+                self.manifold.make_tangent(
+                    E,
+                    pred.E.reshape((pred.E.size(0), -1, pred.E.size(-1))),
+                    missing_coordinate=True,
+                ) * dt,
+            )
+            E = E.reshape(*orig_edge_shape[:-1], orig_edge_shape[-1] + 1)[:, :, :, :-1]
             y = pred.y
             t += dt
         return PlaceHolder(X=X, E=E, y=y).mask(node_mask)
