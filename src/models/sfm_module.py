@@ -331,6 +331,8 @@ class SFMModule(LightningModule):
             # Only one of the two signal inputs is used (the first one)
             signal = signal[:, :, 0].unsqueeze(-1)
             loss = self.model_step(x_1, signal)
+        elif isinstance(x_1, Batch):
+            loss = self.retrobridge_step(x_1)
         else:
             loss = self.model_step(x_1)
 
@@ -371,6 +373,8 @@ class SFMModule(LightningModule):
             # Only one of the two signal inputs is used (the first one)
             signal = signal[:, :, 0].unsqueeze(-1)
             loss = self.model_step(x_1, signal)
+        elif isinstance(x_1, Batch):
+            loss = self.retrobridge_step(x_1)
         else:
             loss = self.model_step(x_1)
 
