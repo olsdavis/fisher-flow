@@ -18,10 +18,11 @@ seed: 12345
 
 trainer:
   max_steps: 450000
+  max_epochs: 100000
   limit_train_batches: null
   gradient_clip_val: 1.0
   accelerator: 'gpu'
-  devices: [0]
+  devices: [2]
 
 model:
   compile: false
@@ -31,12 +32,14 @@ model:
     embed_dim: 256
     time_dependent_weights: null
     time_step: 0.01
+  optimizer:
+    weight_decay: 0.01
 
 logger:
   wandb:
     project: sfm
     tags: ${tags}
     group: promoter_design
-    name: promoter_design_promdfm_B${data.batch_size}_s${seed}
+    name: promoter_design_dfm_val_B${data.batch_size}_wd${model.optimizer.weight_decay}_s${seed}
   aim:
     experiment: "promoter_design"
