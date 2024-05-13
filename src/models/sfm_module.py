@@ -308,8 +308,6 @@ class SFMModule(LightningModule):
     def retrobridge_eval(self):
         """Sampling for retrobridge."""
         samples_left_to_generate = self.samples_to_generate
-        samples_left_to_save = self.samples_to_save
-        chains_left_to_save = self.chains_to_save
 
         samples = []
         grouped_samples = []
@@ -325,8 +323,6 @@ class SFMModule(LightningModule):
             data = data.to(self.device)
             bs = len(data.batch.unique())
             to_generate = bs
-            to_save = min(samples_left_to_save, bs)
-            chains_save = min(chains_left_to_save, bs)
             batch_groups = []
             ground_truth.extend(
                 retrobridge_utils.create_true_reactant_molecules(data, batch_size=bs)
@@ -342,9 +338,7 @@ class SFMModule(LightningModule):
                 batch_groups.append(molecule_list)
 
             ident += to_generate
-            samples_left_to_save -= to_save
             samples_left_to_generate -= to_generate
-            chains_left_to_save -= chains_save
 
             # Regrouping sampled reactants for computing top-N accuracy
             for mol_idx_in_batch in range(bs):
