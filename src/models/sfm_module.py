@@ -364,6 +364,7 @@ class SFMModule(LightningModule):
 
         self.val_molecular_metrics.reset()
 
+    @torch.inference_mode()
     def sample_molecule(
         self,
         data: Batch,
@@ -404,7 +405,8 @@ class SFMModule(LightningModule):
             # make a step
             X = self.manifold.exp_map(
                 X, self.manifold.make_tangent(X, pred.X, missing_coordinate=True) * dt,
-            )[:, :, :-1]
+            )
+            X = self.project(X)[:, :, :-1]
             E = E.reshape(target_edge_shape)
             E = self.manifold.exp_map(
                 E,
@@ -414,6 +416,7 @@ class SFMModule(LightningModule):
                     missing_coordinate=True,
                 ) * dt,
             )
+            E = self.manifold.project(E)
             E = E.reshape(*orig_edge_shape[:-1], orig_edge_shape[-1] + 1)[:, :, :, :-1]
             y = pred.y
             t += dt
