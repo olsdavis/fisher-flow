@@ -46,7 +46,7 @@ class RetroBridgeDatasetInfos:
     atom_decoder = ['N', 'C', 'O', 'S', 'Cl', 'F', 'B', 'Br', 'P', 'Si', 'I', 'Sn', 'Mg', 'Cu', 'Zn', 'Se', '*']
     max_n_dummy_nodes = 10
 
-    def __init__(self, datamodule):
+    def __init__(self, datamodule, extra_info: bool = True):
         self.name = 'USPTO50K-RetroBridge'
         self.input_dims = None
         self.output_dims = None
@@ -65,9 +65,9 @@ class RetroBridgeDatasetInfos:
         self.valency_distribution = None
         self.nodes_dist = None
 
-        self.init_attributes(datamodule)
+        self.init_attributes(datamodule, extra_info)
 
-    def init_attributes(self, datamodule):
+    def init_attributes(self, datamodule, extra_info: bool):
         self.valencies = [5, 4, 6, 6, 7, 1, 3, 7, 5, 4, 7, 4, 2, 4, 2, 6, 0]
         self.atom_weights = {
             1: 14.01, 2: 12.01, 3: 16., 4: 32.06, 5: 35.45, 6: 19., 7: 10.81, 8: 79.91, 9: 30.98,
@@ -102,16 +102,16 @@ class RetroBridgeDatasetInfos:
             self.node_types = datamodule.node_types()
             print("Distribution of node types", self.node_types)
             np.savetxt(f'{info_dir}/atom_types.txt', self.node_types.numpy())
+            if extra_info:
+                self.edge_types = datamodule.edge_counts()
+                print("Distribution of edge types", self.edge_types)
+                np.savetxt(f'{info_dir}/edge_types.txt', self.edge_types.numpy())
 
-            self.edge_types = datamodule.edge_counts()
-            print("Distribution of edge types", self.edge_types)
-            np.savetxt(f'{info_dir}/edge_types.txt', self.edge_types.numpy())
-
-            valencies = datamodule.valency_count(self.max_n_nodes)
-            print("Distribution of the valencies", valencies)
-            np.savetxt(f'{info_dir}/valencies.txt', valencies.numpy())
-            self.valency_distribution = valencies
-            self.nodes_dist = retrobridge_utils.DistributionNodes(self.n_nodes)
+                valencies = datamodule.valency_count(self.max_n_nodes)
+                print("Distribution of the valencies", valencies)
+                np.savetxt(f'{info_dir}/valencies.txt', valencies.numpy())
+                self.valency_distribution = valencies
+                self.nodes_dist = retrobridge_utils.DistributionNodes(self.n_nodes)
 
     def compute_input_output_dims(self, datamodule, extra_features, domain_features, use_context):
         example_batch = next(iter(datamodule.train_dataloader()))

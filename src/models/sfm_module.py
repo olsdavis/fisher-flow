@@ -126,7 +126,7 @@ class SFMModule(LightningModule):
         self.fix_product_nodes = fix_product_nodes
         self.lambda_train = lambda_train
         if datamodule is not None:
-            self.dataset_infos = RetroBridgeDatasetInfos(datamodule)
+            self.dataset_infos = RetroBridgeDatasetInfos(datamodule, extra_info=False)
             self.extra_features = (
                 ExtraFeatures(extra_features, dataset_info=self.dataset_infos)
                 if extra_features is not None
