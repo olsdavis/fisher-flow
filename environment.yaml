@@ -10,6 +10,7 @@ name: myenv
 channels:
   - pytorch
   - conda-forge
+  - nvidia
   - defaults
 
 # it is strongly recommended to specify versions of packages installed through conda
@@ -31,8 +32,10 @@ dependencies:
   - pre-commit=3.*
   - pytest=7.*
   # ours
+  - pytorch-cuda=12.1
   - matplotlib=3.7.1
   - seaborn=0.12.2
+  - pip>=23
   - pip:
     - torch==2.1.0
     - POT==0.9.3
@@ -51,6 +54,9 @@ dependencies:
     - cooler==0.9.3
     - cooltools==0.7.0
     - torchdiffeq==0.2.3
+    - hydra-optuna-sweeper
+    - hydra-colorlog
+    - rootutils
 
 
   # --------- loggers --------- #
@@ -60,8 +66,3 @@ dependencies:
   # - comet-ml
   # - aim>=3.16.2 # no lower than 3.16.2, see https://github.com/aimhubio/aim/issues/2550
 
-  - pip>=23
-  - pip:
-      - hydra-optuna-sweeper
-      - hydra-colorlog
-      - rootutils

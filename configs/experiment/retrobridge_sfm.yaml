@@ -1,0 +1,41 @@
+# @package _global_
+
+# to execute this experiment run:
+# python train.py experiment=example
+
+defaults:
+  - override /data: retrobridge
+  - override /model: retrobridge_sfm_gt
+  - override /callbacks: default
+  - override /trainer: default
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+
+# first tag is the data set, second tag is the model
+tags: ["retrosyn", "sfm_gt"]
+
+seed: 12345
+
+trainer:
+  min_epochs: 1
+  max_epochs: 1000
+  gradient_clip_val: 1.0
+  num_sanity_val_steps: 0
+
+model:
+  optimizer:
+    lr: 0.001
+  compile: false
+
+data:
+  batch_size: 64
+
+logger:
+  wandb:
+    project: sfm
+    tags: ${tags}
+    group: retrosyn
+    name: retrobridge_retro_syn_s12347
+  aim:
+    experiment: test_exp
