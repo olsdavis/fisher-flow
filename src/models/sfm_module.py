@@ -388,6 +388,7 @@ class SFMModule(LightningModule):
                 "E_t": E,
                 "X_t": X,
                 "y": y,
+                "y_t": product.y,
                 "node_mask": node_mask,
             }
             extra_data = self.compute_extra_data(noisy_data, context=None)
