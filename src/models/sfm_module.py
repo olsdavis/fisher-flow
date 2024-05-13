@@ -10,6 +10,7 @@ from lightning.pytorch.utilities import grad_norm
 from torchmetrics import MeanMetric, MinMetric, MaxMetric
 from torch_ema import ExponentialMovingAverage
 from torch_geometric.data import Batch
+from tqdm import tqdm
 
 
 from src.sfm import (
@@ -21,7 +22,13 @@ from src.sfm import (
 from src.models.net import TangentWrapper
 from src.data.components.promoter_eval import SeiEval
 from src.data import RetroBridgeDatasetInfos, PlaceHolder, retrobridge_utils
-from src.experiments.retrosynthesis import ExtraFeatures, ExtraMolecularFeatures, DummyExtraFeatures
+from src.experiments.retrosynthesis import (
+    DummyExtraFeatures,
+    ExtraFeatures,
+    ExtraMolecularFeatures,
+    SamplingMolecularMetrics,
+    compute_retrosynthesis_metrics,
+)
 
 
 def geodesic(manifold, start_point, end_point):
@@ -76,6 +83,8 @@ class SFMModule(LightningModule):
         chains_to_save: int = 5,
         fix_product_nodes: bool = True,
         lambda_train: list[int] = [5, 0],
+        samples_to_generate: int = 128,
+        samples_per_input: int = 5,
     ) -> None:
         """
         :param net: The model to train.
@@ -115,18 +124,20 @@ class SFMModule(LightningModule):
         self.retrobridge = datamodule is not None
 
         # retrobridge variables
-        self.input_dims = input_dims
-        self.output_dims = output_dims
-        self.transition = transition
-        self.extra_features = extra_features
-        self.extra_molecular_features = extra_molecular_features
-        self.use_context = use_context
-        self.number_chain_steps_to_save = number_chain_steps_to_save
-        self.chains_to_save = chains_to_save
-        self.fix_product_nodes = fix_product_nodes
-        self.lambda_train = lambda_train
         if datamodule is not None:
-            self.dataset_infos = RetroBridgeDatasetInfos(datamodule, extra_info=False)
+            self.input_dims = input_dims
+            self.output_dims = output_dims
+            self.transition = transition
+            self.extra_features = extra_features
+            self.extra_molecular_features = extra_molecular_features
+            self.use_context = use_context
+            self.number_chain_steps_to_save = number_chain_steps_to_save
+            self.chains_to_save = chains_to_save
+            self.fix_product_nodes = fix_product_nodes
+            self.lambda_train = lambda_train
+            self.samples_to_generate = samples_to_generate
+            self.samples_per_input = samples_per_input
+            self.dataset_infos = RetroBridgeDatasetInfos(datamodule)
             self.extra_features = (
                 ExtraFeatures(extra_features, dataset_info=self.dataset_infos)
                 if extra_features is not None
@@ -143,7 +154,9 @@ class SFMModule(LightningModule):
                 domain_features=self.domain_features,
                 use_context=use_context,
             )
-
+            self.val_molecular_metrics = SamplingMolecularMetrics(
+                self.dataset_infos, datamodule.train_smiles,
+            )
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Perform a forward pass through the model `self.net`."""
@@ -277,6 +290,9 @@ class SFMModule(LightningModule):
         x_1: torch.Tensor,
         t: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Computes flow-matching target; returns point and target itself.
+        """
         with torch.inference_mode(False):
             # https://github.com/facebookresearch/riemannian-fm/blob/main/manifm/model_pl.py
             def cond_u(x0, x1, t):
@@ -288,6 +304,114 @@ class SFMModule(LightningModule):
         target = target.squeeze()
         # assert self.manifold.all_belong_tangent(x_t, target)
         return x_t, target
+    
+    def retrobridge_eval(self):
+        """Sampling for retrobridge."""
+        samples_left_to_generate = self.samples_to_generate
+        samples_left_to_save = self.samples_to_save
+        chains_left_to_save = self.chains_to_save
+
+        samples = []
+        grouped_samples = []
+        ground_truth = []
+
+        ident = 0
+
+        dataloader = self.trainer.datamodule.val_dataloader()
+        for data in tqdm(dataloader, total=samples_left_to_generate // dataloader.batch_size):
+            if samples_left_to_generate <= 0:
+                break
+
+            data = data.to(self.device)
+            bs = len(data.batch.unique())
+            to_generate = bs
+            to_save = min(samples_left_to_save, bs)
+            chains_save = min(chains_left_to_save, bs)
+            batch_groups = []
+            ground_truth.extend(
+                retrobridge_utils.create_true_reactant_molecules(data, batch_size=bs)
+            )
+            for _ in range(self.samples_per_input):
+                mol_batch = self.sample_molecule(
+                    data=data,
+                )
+                molecule_list = retrobridge_utils.create_pred_reactant_molecules(
+                    mol_batch.X, mol_batch.E, data.batch, batch_size=bs,
+                )
+                samples.extend(molecule_list)
+                batch_groups.append(molecule_list)
+
+            ident += to_generate
+            samples_left_to_save -= to_save
+            samples_left_to_generate -= to_generate
+            chains_left_to_save -= chains_save
+
+            # Regrouping sampled reactants for computing top-N accuracy
+            for mol_idx_in_batch in range(bs):
+                mol_samples_group = []
+                for batch_group in zip(batch_groups):
+                    mol_samples_group.append(batch_group[mol_idx_in_batch])
+
+                assert len(mol_samples_group) == self.samples_per_input
+                grouped_samples.append(mol_samples_group)
+
+        to_log = compute_retrosynthesis_metrics(
+            grouped_samples=grouped_samples,
+            ground_truth=ground_truth,
+            atom_decoder=self.dataset_infos.atom_decoder,
+            grouped_scores=None,
+        )
+        for metric_name, metric in to_log.items():
+            self.log(metric_name, metric)
+
+        to_log = self.sampling_metrics(samples)
+        for metric_name, metric in to_log.items():
+            self.log(metric_name, metric)
+
+        self.sampling_metrics.reset()
+
+    def sample_molecule(
+        self,
+        data: Batch,
+    ) -> PlaceHolder:
+        """
+        Samples reactants given a product contained in `data`.
+        """
+        # generate molecules
+        product, node_mask = retrobridge_utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)
+        product = product.mask(node_mask)
+        X, E, y = (
+            product.X,
+            product.E,
+            torch.empty((node_mask.shape[0], 0), device=self.device),
+        )
+        # do joint tangent Euler method
+        dt = torch.tensor(1.0 / self.inference_steps, device=data.x.device)
+        t = torch.zeros(data.batch_size, 1, device=data.x.device)
+        for _ in range(self.inference_steps):
+            noisy_data = {
+                "t": t,
+                "E_t": E,
+                "X_t": X,
+                "y": y,
+                "node_mask": node_mask,
+            }
+            extra_data = self.compute_extra_data(noisy_data, context=None)
+            pred = self.retrobridge_forward(noisy_data, extra_data, node_mask)
+            # put on simplex
+            E = self.encode_empty_cat(pred.E)
+            X = self.encode_empty_cat(pred.X)
+            # make a step
+            X = self.manifold.exp_map(
+                X, self.manifold.make_tangent(X, pred.X, missing_coordinate=True) * dt,
+            )[:, :, :-1]
+            E = self.manifold.exp_map(
+                E,
+                self.manifold.make_tangent(E, pred.E, missing_coordinate=True) * dt,
+            )[:, :, :, :-1]
+            y = pred.y
+            t += dt
+        return PlaceHolder(X=X, E=E, y=y).mask(node_mask)
 
     def training_step(
         self, x_1: torch.Tensor | list[torch.Tensor] | Batch, batch_idx: int,
@@ -360,6 +484,9 @@ class SFMModule(LightningModule):
                 inference_steps=self.inference_steps,
             )
             self.log("val/kl", kl, on_step=False, on_epoch=True, prog_bar=True)
+        if self.dataset_infos is not None:
+            # evaluate retrobridge
+            self.retrobridge_eval()
 
     def test_step(self, x_1: torch.Tensor | list[torch.Tensor], batch_idx: int):
         """Perform a single test step on a batch of data from the test set.
