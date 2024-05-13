@@ -87,11 +87,12 @@ if __name__ == "__main__":
     print('ab_proj2', ab_proj2)
 
 def sample_cond_prob_path(mode, fix_alpha, alpha_scale, seq, alphabet_size):
-    #import pdb; pdb.set_trace()
     B = seq.shape[0]
     L = seq.shape[1]
-    #seq_one_hot = seq
-    seq_one_hot = torch.nn.functional.one_hot(seq, num_classes=alphabet_size)
+    if seq.shape[-1] == alphabet_size:
+        seq_one_hot = seq
+    else:
+        seq_one_hot = torch.nn.functional.one_hot(seq, num_classes=alphabet_size)
     if mode == 'dirichlet':
         alphas = torch.from_numpy(1 + scipy.stats.expon().rvs(size=B) * alpha_scale).to(seq.device).float()
         if fix_alpha:

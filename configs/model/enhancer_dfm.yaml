@@ -1,0 +1,53 @@
+_target_: src.models.DNAModule
+
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 0.001
+  weight_decay: 0.0
+
+scheduler: null
+
+# scheduler:
+#   _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+#   _partial_: true
+#   mode: min
+#   factor: 0.1
+#   patience: 10
+
+net:
+  _target_: src.models.net.CNNModel
+  dim: 4 #  alphabet size
+  hidden: 128
+  mode: dirichlet
+  num_cls: 81 # output classes 47 for MEL
+  depth: 5
+  dropout: 0.0
+  prior_pseudocount: 2.0
+  cls_expanded_simplex: False
+  clean_data: False
+  classifier: False
+  classifier_free_guidance: False
+
+
+compile: false
+
+print_freq: 200
+
+cls_free_guidance: true
+guidance_scale: 3
+
+clean_cls_model: cnn
+cls_model: cnn
+
+clean_cls_ckpt_hparams: workdir/clsDNAclean_cnn_1stack_2023-12-30_15-01-30/lightning_logs/version_0/hparams.yaml
+clean_cls_ckpt: workdir/clsDNAclean_cnn_1stack_2023-12-30_15-01-30/epoch=15-step=10480.ckpt
+
+target_class: 2
+
+allow_nan_cfactor: true
+all_class_inference: true
+probability_addition: true
+
+sep_x_y: true # sep x anx y in general step like original DFM repo
+

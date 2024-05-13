@@ -723,7 +723,6 @@ class Dense(nn.Module):
 class CNNModel(nn.Module):
     def __init__(self,
             dim: int,
-            k: int,
             hidden: int,
             mode: str,
             num_cls: int,
@@ -738,7 +737,6 @@ class CNNModel(nn.Module):
         ):
         super().__init__()
         self.dim = dim
-        self.k = k
         self.hidden = hidden
         self.mode = mode
         self.depth = depth

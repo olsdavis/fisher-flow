@@ -1,4 +1,7 @@
 _target_: src.data.DNAEnhancerDataModule
-batch_size: 64 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
-num_workers: 32
-pin_memory: True
+dataset: "FlyBrain" # choices are "MEL2" and "FlyBrain"
+data_dir: ${paths.data_dir}/the_code/General/data/Deep
+batch_size: 128 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
+num_workers: 4
+pin_memory: false
+subset_train_as_val: true
