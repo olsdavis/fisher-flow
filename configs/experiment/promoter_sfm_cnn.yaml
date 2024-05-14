@@ -5,7 +5,7 @@
 
 defaults:
   - override /data: promoter_design
-  - override /model: toy_cnn_sfm
+  - override /model: bsignal_mlp
   - override /callbacks: default
   - override /trainer: default
 
@@ -26,13 +26,15 @@ model:
     lr: 0.001
   net:
     k: 1024
-    dim: 6
-    manifold: sphere
+    dim: 4
+  manifold: sphere
   compile: false
+  promoter_eval: true
 
 logger:
   wandb:
     tags: ${tags}
     group: "promoter_design"
+    name: promoter_design_sfm_bmlp_B${data.batch_size}
   aim:
     experiment: "promoter_design"

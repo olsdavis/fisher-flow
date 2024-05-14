@@ -20,6 +20,7 @@ trainer:
   min_epochs: 1
   max_epochs: 1000
   gradient_clip_val: 1.0
+  num_sanity_val_steps: 0
 
 model:
   optimizer:

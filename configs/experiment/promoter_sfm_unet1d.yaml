@@ -5,35 +5,44 @@
 
 defaults:
   - override /data: promoter_design
-  - override /model: promoter_model
+  - override /model: promoter_sfm_unet1d
   - override /callbacks: default
   - override /trainer: default
 
 # all parameters below will be merged with parameters from default configurations set above
 # this allows you to overwrite only specified parameters
 
-tags: ["promoter_design", "promoter_model"]
+tags: ["promoter_design", "sfm_unet1d"]
 
 seed: 12345
 
 trainer:
   min_epochs: 1
-  max_epochs: 1000
+  max_epochs: 200
   gradient_clip_val: 1.0
 
 model:
+  optimizer:
+    lr: 0.001
+  net:
+    k: 1024
+    dim: 4
+    sig_emb: 128
+    batch_norm: false
+    time_emb_size: 32
+    depth: 5
+    filters: 128
+  manifold: sphere
+  # label_smoothing: 0.81
   compile: false
   promoter_eval: true
-  net:
-    mode: sfm  # just ignores the custom stuff
-  ot_method: None
   inference_steps: 100
-  manifold: sphere
+  ot_method: None
 
 logger:
   wandb:
     tags: ${tags}
     group: "promoter_design"
-    name: promoter_design_promdfm_B${data.batch_size}
+    name: promoter_design_sfm_unet1d_B${data.batch_size}
   aim:
     experiment: "promoter_design"

@@ -5,6 +5,7 @@ from .maths import (
     usinc,
 )
 from .manifold import (
+    GeooptSphere,
     Manifold,
     NSimplex,
     NSphere,

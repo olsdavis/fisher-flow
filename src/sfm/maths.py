@@ -23,4 +23,7 @@ def fast_dot(u: Tensor, v: Tensor, keepdim: bool = True) -> Tensor:
     # if keepdim:
     #     ret = ret.unsqueeze(-1)
     # return ret
-    return (u * v).sum(dim=-1, keepdim=keepdim)
+    ret = torch.einsum("bnd,bnd->bn", u, v)
+    if keepdim:
+        ret = ret.unsqueeze(-1)
+    return ret

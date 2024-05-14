@@ -92,9 +92,13 @@ class Manifold(ABC):
         Returns:
             The geodesic interpolant at time `t`.
         """
+        assert self.all_belong(x_0)
+        assert self.all_belong(x_1)
         t = t.unsqueeze(-1)
-        t = t.repeat(1, x_0.size(1), 1)
-        return self.exp_map(x_0, t * self.log_map(x_0, x_1))
+        x_t = self.exp_map(x_0, t * self.log_map(x_0, x_1))
+        return self.project(x_t)
+        # p x_1[x_1.sum(dim=-1) < 0.25, :]
+        # (x_1.sum(dim=-1) == 1.0).shape
 
     @torch.inference_mode()
     def tangent_euler(
@@ -120,9 +124,9 @@ class Manifold(ABC):
         t = torch.zeros((x.size(0), 1), device=x_0.device, dtype=x_0.dtype)
         for _ in range(steps):
             if tangent:
-                x = self.exp_map(x, self.make_tangent(x, model(x=x, t=t)) * dt)
+                x = self.exp_map(x, model(x=x, t=t) * dt)
             else:
-                x = x + self.make_tangent(x, model(x=x, t=t)) * dt
+                x = x + model(x=x, t=t) * dt
             x = self.project(x)
             t += dt
         return x
@@ -204,9 +208,10 @@ class Manifold(ABC):
         """
 
     @abstractmethod
-    def make_tangent(self, p: Tensor, v: Tensor) -> Tensor:
+    def make_tangent(self, p: Tensor, v: Tensor, missing_coordinate: bool = False) -> Tensor:
         """
-        Projects the vector `v` on the tangent space of `p`.
+        Projects the vector `v` on the tangent space of `p`. If `missing_coordinate`, adds an
+        extra entry for each product space that makes it tangent.
         """
 
     @abstractmethod
@@ -267,22 +272,23 @@ class NSimplex(Manifold):
         """
         See `Manifold.log_map`.
         """
-        """ret = torch.zeros_like(p)
+        ret = torch.zeros_like(p)
         z = (p * q).sqrt()
         s = z.sum(dim=-1, keepdim=True)
         close = ((s.square() - 1.0).abs() < 1e-7).expand_as(ret)
         ret[~close] = (2.0 * safe_arccos(s) / (1.0 - s.square()).sqrt() * (z - s * p))[~close]
-        return ret"""
+        return ret
+        """
         z = (p * q).sqrt()
         s = z.sum(dim=-1, keepdim=True)
-        return 2.0 * safe_arccos(s) / (1.0 - s.square()).sqrt() * (z - s * p)
+        return 2.0 * safe_arccos(s) / (1.0 - s.square()).sqrt() * (z - s * p)"""
 
     def geodesic_distance(self, p: Tensor, q: Tensor) -> Tensor:
         """
         See `Manifold.geodesic_distance`.
         """
-        d = (p * q).sqrt().sum(dim=-1, keepdim=True)
-        return 2.0 * safe_arccos(d).sum(dim=1)
+        d = (p * q).sqrt().sum(dim=-1)
+        return (2.0 * safe_arccos(d)).square().sum(dim=-1).sqrt()
 
     def metric(self, x: Tensor, u: Tensor, v: Tensor) -> Tensor:
         """
@@ -306,10 +312,12 @@ class NSimplex(Manifold):
         )
         return y_s * q_s
 
-    def make_tangent(self, p: Tensor, v: Tensor) -> Tensor:
+    def make_tangent(self, p: Tensor, v: Tensor, missing_coordinate: bool = False) -> Tensor:
         """
         See `Manifold.make_tangent`.
         """
+        if missing_coordinate:
+            return torch.cat([v, -v.sum(dim=-1, keepdim=True)], dim=-1)
         return v - v.mean(dim=-1, keepdim=True)
 
     def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
@@ -356,7 +364,7 @@ class NSimplex(Manifold):
         """
         See `Manifold.all_belong_tangent`.
         """
-        return torch.allclose(v.sum(dim=-1), torch.tensor(0.0))
+        return torch.allclose(v.sum(dim=-1), torch.tensor(0.0), atol=1e-4)
 
     def project(self, x: Tensor) -> Tensor:
         """
@@ -398,7 +406,7 @@ class NSphere(Manifold):
         """
         cos = fast_dot(p, q, keepdim=False)
         # sum across product space
-        return safe_arccos(cos).sum(dim=1)
+        return safe_arccos(cos).square().sum(dim=-1).sqrt()
 
     def metric(self, x: Tensor, u: Tensor, v: Tensor) -> Tensor:
         """
@@ -445,12 +453,13 @@ class NSphere(Manifold):
         ret = normalized - p
         return ret
 
-    def make_tangent(self, p: Tensor, v: Tensor) -> Tensor:
+    def make_tangent(self, p: Tensor, v: Tensor, missing_coordinate: bool = False) -> Tensor:
         """
         See `Manifold.make_tangent`.
         """
-        # TODO: remove?
-        p = p.abs()
+        p = self.project(p)
+        if missing_coordinate:
+            return torch.cat([v, -(p[:, :, :-1] * v).sum(dim=-1, keepdim=True)], dim=-1)
         # return v - p * fast_dot(p, v)
         # keep the normalisation even if = 1: more precise!
         sq = p.square().sum(dim=-1, keepdim=True)
@@ -524,7 +533,7 @@ class GeooptSphere(Manifold):
         return self.sphere.logmap(p, q)
 
     def geodesic_distance(self, p: Tensor, q: Tensor) -> Tensor:
-        return self.sphere.dist(p, q).sum(dim=1)
+        return self.sphere.dist2(p, q).sum(dim=-1).sqrt()
 
     def metric(self, x: Tensor, u: Tensor, v: Tensor) -> Tensor:
         return self.sphere.inner(x, u, v)
@@ -532,13 +541,21 @@ class GeooptSphere(Manifold):
     def parallel_transport(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
         return self.sphere.transp(p, q, v)
 
-    def make_tangent(self, p: Tensor, v: Tensor) -> Tensor:
-        # TODO: add abs?
-        p = self.sphere.projx(p)
+    def parallel_transport_alt(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
+        denom = 1 + self.metric(p, p, q).unsqueeze(-1)
+        res = v - self.metric(p, q, v).unsqueeze(-1) / denom * (p + q)
+        cond = denom.gt(1e-3)
+        return torch.where(cond, res, -v)
+
+    def make_tangent(self, p: Tensor, v: Tensor, missing_coordinate: bool = False) -> Tensor:
+        if missing_coordinate:
+            return NSphere().make_tangent(p, v, missing_coordinate)
+        p = self.project(p)
         return self.sphere.proju(p, v)
 
     def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
-        return self.sphere.random_uniform((n, k, d)).abs()
+        ret = self.sphere.random_uniform((n, k, d)).abs()
+        return ret
 
     def smooth_labels(self, labels: Tensor, mx: float = 0.98) -> Tensor:
         return NSimplex().send_to(NSimplex().smooth_labels(labels, mx), NSphere)
@@ -560,7 +577,34 @@ class GeooptSphere(Manifold):
         """
         See `Manifold.project`.
         """
-        return self.sphere.projx(x)
+        return self.sphere.projx(x).abs()
+
+
+class GeomStatsSphere(Manifold):
+    pass
+
+
+class LinearNSimplex(NSimplex):
+    def exp_map(self, p: Tensor, v: Tensor) -> Tensor:
+        return p + v
+
+    def log_map(self, p: Tensor, q: Tensor) -> Tensor:
+        return q - p
+
+    def geodesic_distance(self, p: Tensor, q: Tensor) -> Tensor:
+        return (p - q).square().sum(dim=(-1, -2)).sqrt()
+
+    def metric(self, x: Tensor, u: Tensor, v: Tensor) -> Tensor:
+        return fast_dot(u, v)
+
+    def parallel_transport(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
+        return v
+
+    def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
+        return NSimplex().uniform_prior(n, k, d)
+
+    def all_belong_tangent(self, x: Tensor, v: Tensor) -> bool:
+        return torch.allclose(fast_dot(x, v), torch.tensor(0.0))
 
 
 def manifold_from_name(name: str) -> Manifold:
@@ -571,4 +615,6 @@ def manifold_from_name(name: str) -> Manifold:
         return GeooptSphere()
     elif name == "simplex":
         return NSimplex()
+    elif name == "linear-simplex":
+        return LinearNSimplex()
     raise ValueError(f"Unknown manifold: {name}")

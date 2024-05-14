@@ -88,18 +88,6 @@ class DNAEnhancerDataModule(LightningDataModule):
             val_set_size = len(self.data_val)
             self.data_val = Subset(self.data_train, torch.randperm(len(self.data_train))[:val_set_size])
 
-    def setup(self, stage: str | None = None) -> None:
-        """
-        Load data. Set variables: `self.data_train`, `self.data_val`, `self.data_test`.
-        """
-        # Divide batch size by the number of devices.
-        if self.trainer is not None:
-            if self.hparams.batch_size % self.trainer.world_size != 0:
-                raise RuntimeError(
-                    f"Batch size ({self.hparams.batch_size}) is not divisible by the number of devices ({self.trainer.world_size})."
-                )
-            self.batch_size_per_device = self.hparams.batch_size // self.trainer.world_size
-
     def train_dataloader(self) -> DataLoader[Any]:
         """Create and return the train dataloader.
 
@@ -118,9 +106,9 @@ class DNAEnhancerDataModule(LightningDataModule):
 
         :return: The validation dataloader.
         """
-        assert self.data_val
+        assert self.data_valid
         return DataLoader(
-            dataset=self.data_val,
+            dataset=self.data_valid,
             batch_size=self.batch_size_per_device,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
@@ -141,13 +129,13 @@ class DNAEnhancerDataModule(LightningDataModule):
             shuffle=False,
         )
 
-    def teardown(self, stage: str | None = None):
-        """Lightning hook for cleaning up after `trainer.fit()`, `trainer.validate()`,
-        `trainer.test()`, and `trainer.predict()`.
+    # def teardown(self, stage: str | None = None):
+    #     """Lightning hook for cleaning up after `trainer.fit()`, `trainer.validate()`,
+    #     `trainer.test()`, and `trainer.predict()`.
 
-        :param stage: The stage being torn down. Either `"fit"`, `"validate"`, `"test"`, or `"predict"`.
-            Defaults to ``None``.
-        """
+    #     :param stage: The stage being torn down. Either `"fit"`, `"validate"`, `"test"`, or `"predict"`.
+    #         Defaults to ``None``.
+    #     """
 
     def state_dict(self) -> dict[Any, Any]:
         """Called when saving a checkpoint. Implement to generate and save the datamodule state.
@@ -156,12 +144,12 @@ class DNAEnhancerDataModule(LightningDataModule):
         """
         return {}
 
-    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        """Called when loading a checkpoint. Implement to reload datamodule state given datamodule
-        `state_dict()`.
+    # def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+    #     """Called when loading a checkpoint. Implement to reload datamodule state given datamodule
+    #     `state_dict()`.
 
-        :param state_dict: The datamodule state returned by `self.state_dict()`.
-        """
+    #     :param state_dict: The datamodule state returned by `self.state_dict()`.
+    #     """
 
 
 if __name__ == "__main__":

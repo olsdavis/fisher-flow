@@ -5,7 +5,7 @@
 
 defaults:
   - override /data: promoter_design
-  - override /model: promoter_model
+  - override /model: rfm_tmlp_signal
   - override /callbacks: default
   - override /trainer: default
 
@@ -20,15 +20,16 @@ trainer:
   min_epochs: 1
   max_epochs: 1000
   gradient_clip_val: 1.0
+  num_sanity_val_steps: 0
 
 model:
   compile: false
   promoter_eval: true
   net:
-    mode: sfm  # just ignores the custom stuff
-  ot_method: None
-  inference_steps: 100
-  manifold: sphere
+    k: 1024
+    dim: 4
+  atol: 1e-7
+  rtol: 1e-7
 
 logger:
   wandb:

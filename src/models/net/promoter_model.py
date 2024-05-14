@@ -86,7 +86,8 @@ class PromoterModel(nn.Module):
         self.act = lambda x: x * torch.sigmoid(x)
         self.relu = nn.ReLU()
         self.softplus = nn.Softplus()
-        self.scale = nn.Parameter(torch.ones(1))
+        # was unused
+        # self.scale = nn.Parameter(torch.ones(1))
         self.final = nn.Sequential(nn.Conv1d(n, n, kernel_size=1),
                                    nn.GELU(),
                                    nn.Conv1d(n, 4, kernel_size=1))
