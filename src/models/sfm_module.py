@@ -154,9 +154,7 @@ class SFMModule(LightningModule):
                 domain_features=self.domain_features,
                 use_context=use_context,
             )
-            self.val_molecular_metrics = SamplingMolecularMetrics(
-                self.dataset_infos, datamodule.train_smiles,
-            )
+            # self.val_molecular_metrics = SamplingMolecularMetrics(self.dataset_infos, datamodule.train_smiles,)
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Perform a forward pass through the model `self.net`."""
@@ -420,7 +418,22 @@ class SFMModule(LightningModule):
             E = E.reshape(*orig_edge_shape[:-1], orig_edge_shape[-1] + 1)[:, :, :, :-1]
             y = pred.y
             t += dt
-        return PlaceHolder(X=X, E=E, y=y).mask(node_mask)
+        # X and E, flattened, are on the sphere; so we can determine the
+        # last coordinate that we removed
+        # that is useful to determine whether the edge/node is present or
+        # not at all
+        def to_one_hot(tensor: torch.Tensor):
+            orig_shape = tensor.shape
+            tensor = tensor.reshape(orig_shape[0], -1, orig_shape[-1])
+            remaining = tensor.square().sum(dim=-1, keepdim=True)
+            combined = torch.cat([tensor, (1.0 - remaining).sqrt()], dim=-1)
+            argmax = combined.argmax(dim=-1)
+            ret = F.one_hot(argmax, num_classes=combined.shape[-1])
+            ret[argmax == combined.shape[-1] - 1, :] = 0
+            return ret[:, :, :-1].reshape(orig_shape)
+        return PlaceHolder(
+            X=to_one_hot(X), E=to_one_hot(E), y=y,
+        ).mask(node_mask)
 
     def training_step(
         self, x_1: torch.Tensor | list[torch.Tensor] | Batch, batch_idx: int,
