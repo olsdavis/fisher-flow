@@ -406,7 +406,7 @@ class SFMModule(LightningModule):
             X = self.manifold.exp_map(
                 X, self.manifold.make_tangent(X, pred.X, missing_coordinate=True) * dt,
             )
-            X = self.project(X)[:, :, :-1]
+            X = self.manifold.project(X)[:, :, :-1]
             E = E.reshape(target_edge_shape)
             E = self.manifold.exp_map(
                 E,
