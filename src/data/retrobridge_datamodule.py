@@ -102,16 +102,15 @@ class RetroBridgeDatasetInfos:
             self.node_types = datamodule.node_types()
             print("Distribution of node types", self.node_types)
             np.savetxt(f'{info_dir}/atom_types.txt', self.node_types.numpy())
-            if False:
-                self.edge_types = datamodule.edge_counts()
-                print("Distribution of edge types", self.edge_types)
-                np.savetxt(f'{info_dir}/edge_types.txt', self.edge_types.numpy())
+            self.edge_types = datamodule.edge_counts()
+            print("Distribution of edge types", self.edge_types)
+            np.savetxt(f'{info_dir}/edge_types.txt', self.edge_types.numpy())
 
-                valencies = datamodule.valency_count(self.max_n_nodes)
-                print("Distribution of the valencies", valencies)
-                np.savetxt(f'{info_dir}/valencies.txt', valencies.numpy())
-                self.valency_distribution = valencies
-                self.nodes_dist = retrobridge_utils.DistributionNodes(self.n_nodes)
+            valencies = datamodule.valency_count(self.max_n_nodes)
+            print("Distribution of the valencies", valencies)
+            np.savetxt(f'{info_dir}/valencies.txt', valencies.numpy())
+            self.valency_distribution = valencies
+            self.nodes_dist = retrobridge_utils.DistributionNodes(self.n_nodes)
 
     def compute_input_output_dims(self, datamodule, extra_features, domain_features, use_context):
         example_batch = next(iter(datamodule.train_dataloader()))

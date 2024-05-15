@@ -85,7 +85,7 @@ class SFMModule(LightningModule):
         lambda_train: list[int] = [5, 0],
         samples_to_generate: int = 128,
         samples_per_input: int = 5,
-    ) -> None:
+    ):
         """
         :param net: The model to train.
         :param optimizer: The optimizer to use for training.
@@ -95,7 +95,7 @@ class SFMModule(LightningModule):
 
         # this line allows to access init params with 'self.hparams' attribute
         # also ensures init params will be stored in ckpt
-        self.save_hyperparameters(logger=False)
+        self.save_hyperparameters(ignore=['net'], logger=False)
         # if basically zero or zero
         self.smoothing = label_smoothing if label_smoothing and label_smoothing > 1e-6 else None
         self.tangent_euler = tangent_euler
@@ -154,7 +154,7 @@ class SFMModule(LightningModule):
                 domain_features=self.domain_features,
                 use_context=use_context,
             )
-            # self.val_molecular_metrics = SamplingMolecularMetrics(self.dataset_infos, datamodule.train_smiles,)
+            self.val_molecular_metrics = SamplingMolecularMetrics(self.dataset_infos, datamodule.train_smiles,)
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Perform a forward pass through the model `self.net`."""
@@ -341,7 +341,7 @@ class SFMModule(LightningModule):
             # Regrouping sampled reactants for computing top-N accuracy
             for mol_idx_in_batch in range(bs):
                 mol_samples_group = []
-                for batch_group in zip(batch_groups):
+                for batch_group in batch_groups:
                     mol_samples_group.append(batch_group[mol_idx_in_batch])
 
                 assert len(mol_samples_group) == self.samples_per_input
@@ -433,7 +433,7 @@ class SFMModule(LightningModule):
             return ret[:, :, :-1].reshape(orig_shape)
         return PlaceHolder(
             X=to_one_hot(X), E=to_one_hot(E), y=y,
-        ).mask(node_mask)
+        ).mask(node_mask, collapse=True)
 
     def training_step(
         self, x_1: torch.Tensor | list[torch.Tensor] | Batch, batch_idx: int,
