@@ -1,0 +1,47 @@
+# @package _global_
+
+# to execute this experiment run:
+# python train.py experiment=example
+
+defaults:
+  - override /data: promoter_design
+  - override /model: promoter_dfm
+  - override /callbacks: default
+  - override /trainer: default
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+
+tags: ["promoter_design", "promoter_model"]
+
+seed: 12345
+
+trainer:
+  max_steps: 200000
+  max_epochs: 100000
+  limit_train_batches: null
+  gradient_clip_val: 1.0
+  accelerator: 'gpu'
+  devices: [0]
+
+model:
+  compile: false
+  net: # TODO: not used remove
+  model:
+    mode: dirichlet
+    embed_dim: 256
+    time_dependent_weights: null
+    time_step: 0.01
+  optimizer:
+    weight_decay: 0.00
+
+logger:
+  wandb:
+    project: sfm
+    tags: ${tags}
+    group: promoter_design
+    name: promoter_design_dfm_fix_B${data.batch_size}_wd${model.optimizer.weight_decay}_s${seed}
+  aim:
+    experiment: "promoter_design"
+
+ckpt_path: /homes/44/skessler/simplex-flow/logs/train/runs/2024-05-10_12-54-49/checkpoints/epoch_006.ckpt
