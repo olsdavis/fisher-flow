@@ -85,6 +85,7 @@ class SFMModule(LightningModule):
         lambda_train: list[int] = [5, 0],
         samples_to_generate: int = 128,
         samples_per_input: int = 5,
+        retrobridge_eval_every: int = 10,
     ):
         """
         :param net: The model to train.
@@ -122,6 +123,7 @@ class SFMModule(LightningModule):
         self.debug_grads = debug_grads
         self.inference_steps = inference_steps
         self.retrobridge = datamodule is not None
+        self.retrobridge_eval_every = retrobridge_eval_every
 
         # retrobridge variables
         if datamodule is not None:
@@ -300,11 +302,16 @@ class SFMModule(LightningModule):
             x_t, target = vmap(cond_u)(x_0, x_1, t)
         x_t = x_t.squeeze()
         target = target.squeeze()
+        if x_0.size(0) == 1:
+            # squeezing will remove the batch
+            x_t = x_t.unsqueeze(0)
+            target = target.unsqueeze(0)
         # assert self.manifold.all_belong_tangent(x_t, target)
         return x_t, target
     
     def retrobridge_eval(self):
         """Evaluation metrics for retrobridge."""
+        print("BROTHER MEC")
         samples_left_to_generate = self.samples_to_generate
 
         samples = []
@@ -506,7 +513,7 @@ class SFMModule(LightningModule):
                 inference_steps=self.inference_steps,
             )
             self.log("val/kl", kl, on_step=False, on_epoch=True, prog_bar=True)
-        if self.dataset_infos is not None:
+        if self.dataset_infos is not None and (self.trainer.current_epoch + 1) % self.retrobridge_eval_every == 0:
             # evaluate retrobridge
             self.retrobridge_eval()
 
