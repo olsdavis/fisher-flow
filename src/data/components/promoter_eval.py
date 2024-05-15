@@ -59,7 +59,7 @@ class SeiEval:
         predh3k4me3 = sei_out.mean(axis=1) # batchsize
         return predh3k4me3
 
-    def eval_sp_mse(self, seq_one_hot: Tensor, target: Tensor, b_index: int) -> Tensor:
+    def eval_sp_mse(self, seq_one_hot: Tensor, target: Tensor, b_index: int | None = None) -> Tensor:
         """
         Evaluate the mean squared error of the SEI profile prediction.
 
@@ -67,12 +67,13 @@ class SeiEval:
             - `seq_one_hot`: The one-hot encoded sequence tensor.
             - `target`: The target tensor;
             - `b_index`: The batch index of the target Tensor; avoids recalculating
-                the profile all the time.
+                the profile all the time; if `None` always calculates profile (useful
+                for testing).
 
         Returns:
             The mean squared error tensor.
         """
-        if b_index in self._sei_cache:
+        if b_index is not None and b_index in self._sei_cache:
             target_prof = self._sei_cache[b_index]
         else:
             target_prof = self.get_sei_profile(target)

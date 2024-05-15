@@ -390,7 +390,12 @@ def compute_retrosynthesis_metrics(grouped_samples, ground_truth, atom_decoder, 
         sampled_smis = []
         for sample in sampled_reactants:
             sampled_mol = build_molecule(sample[0], sample[1], atom_decoder)
-            sampled_smi = Chem.MolToSmiles(sampled_mol)
+            try:
+                sampled_smi = Chem.MolToSmiles(sampled_mol)
+            except RuntimeError as e:
+                print("Error encountered when trying to produce")
+                print(e)
+                sampled_smi = None
             if sampled_smi is None:
                 continue
             sampled_smis.append(sampled_smi)

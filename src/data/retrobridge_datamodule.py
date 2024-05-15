@@ -102,7 +102,6 @@ class RetroBridgeDatasetInfos:
             self.node_types = datamodule.node_types()
             print("Distribution of node types", self.node_types)
             np.savetxt(f'{info_dir}/atom_types.txt', self.node_types.numpy())
-
             self.edge_types = datamodule.edge_counts()
             print("Distribution of edge types", self.edge_types)
             np.savetxt(f'{info_dir}/edge_types.txt', self.edge_types.numpy())
@@ -613,8 +612,11 @@ if __name__ == "__main__":
     retrobridge_data = RetroBridgeDataModule()
     retrobridge_data.setup()
     train_loader = retrobridge_data.train_dataloader()
-    item = next(iter(train_loader))
-    print(item)
-    print(type(item))
-
-
+    mx = 0
+    for batch in train_loader:
+        mx = max(batch.x.size(0), mx)
+    for batch in retrobridge_data.val_dataloader():
+        mx = max(batch.x.size(0), mx)
+    for batch in retrobridge_data.test_dataloader():
+        mx = max(batch.x.size(0), mx)
+    print(mx)
