@@ -1,5 +1,5 @@
 #!/bin/bash
 dims=(5 10 20 40 60 80 100 120 140 160)
 for dim in ${dims[@]}; do
-    sbatch ./script/submit_bmlp_sfm.sh $dim
+    sbatch ./script/submit_bmlp_sfm.sh $dim $1
 done
