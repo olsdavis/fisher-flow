@@ -87,7 +87,7 @@ class PromoterModel(nn.Module):
         self.relu = nn.ReLU()
         self.softplus = nn.Softplus()
         # was unused
-        # self.scale = nn.Parameter(torch.ones(1))
+        self.scale = nn.Parameter(torch.ones(1)) # SK: needed for some of my checkpoints to load...
         self.final = nn.Sequential(nn.Conv1d(n, n, kernel_size=1),
                                    nn.GELU(),
                                    nn.Conv1d(n, 4, kernel_size=1))

@@ -2,7 +2,7 @@ _target_: src.data.RetroBridgeDataModule
 data_dir: ${paths.data_dir}
 batch_size: 512 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
 num_workers: 4
-pin_memory: False
-extra_nodes: False
-evaluation: False
-swap: False
+pin_memory: false
+extra_nodes: true
+evaluation: false
+swap: false

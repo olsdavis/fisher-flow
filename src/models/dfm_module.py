@@ -900,9 +900,6 @@ class PromoterModule(GeneralModule):
         net: Any = None, # TODO: why is this param being added to the yaml config?
     ) -> None:
         super().__init__(validate=validate, print_freq=print_freq)
-
-        # TODO: move model to .yaml config
-        #self.model = PromoterModel(args)
         
         self.mode = mode
         self.ckpt_iterations = ckpt_iterations
@@ -920,7 +917,6 @@ class PromoterModule(GeneralModule):
             self.model = torch.compile(model)
         else:
             self.model = model
-
 
         self.condflow = DirichletConditionalFlow(
             K=self.model.alphabet_size, alpha_spacing=0.01, alpha_max=alpha_max)
@@ -948,6 +944,8 @@ class PromoterModule(GeneralModule):
         if self.validate:
             self.try_print_log()
         self.log("val/loss", loss)
+        B = batch.shape[0]
+        self.log('val/perplexity', torch.exp(loss)[None].expand(B).mean())
 
         seq_one_hot = batch[:, :, :4]
         seq = torch.argmax(seq_one_hot, dim=-1)
@@ -978,6 +976,41 @@ class PromoterModule(GeneralModule):
 
         sei_profile_pred = self.get_sei_profile(seq_pred_one_hot)
         self.log("val/sp-mse", ((sei_profile - sei_profile_pred) ** 2).mean())
+
+    def test_step(self, batch: torch.Tensor, batch_idx: int):
+        self.stage = 'val'
+        loss = self.general_step(batch, batch_idx)
+        self.log("test/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log('test/perplexity', torch.exp(loss.mean())[None].expand(batch.size(0)).mean())
+        seq_one_hot = batch[:, :, :4]
+        seq = torch.argmax(seq_one_hot, dim=-1)
+        signal = batch[:, :, 4:5] # [128, 1024, 1]
+
+        if self.mode == 'dirichlet':
+            logits_pred, _ = self.dirichlet_flow_inference(seq, signal, self.model,
+                alpha_max=self.alpha_max, prior_pseudocount=self.prior_pseudocount, flow_temp=self.flow_temp)
+            seq_pred = torch.argmax(logits_pred, dim=-1)
+        elif self.mode == 'riemannian':
+            logits_pred = self.riemannian_flow_inference(seq, signal)
+            seq_pred = torch.argmax(logits_pred, dim=-1)
+        elif self.mode == 'ardm' or self.mode == 'lrar':
+            seq_pred = self.ar_inference(seq, signal)
+        elif self.mode == 'distill':
+            logits_pred = self.distill_inference(seq, signal)
+            seq_pred = torch.argmax(logits_pred, dim=-1)
+        else:
+            raise NotImplementedError()
+
+        seq_pred_one_hot = torch.nn.functional.one_hot(seq_pred, num_classes=self.model.alphabet_size).float()
+
+        if batch_idx not in self.sei_cache:
+            sei_profile = self.get_sei_profile(seq_one_hot)
+            self.sei_cache = sei_profile
+        else:
+            sei_profile = self.sei_cache[batch_idx]
+
+        sei_profile_pred = self.get_sei_profile(seq_pred_one_hot)
+        self.log("test/sp-mse", ((sei_profile - sei_profile_pred) ** 2).mean())
 
     def general_step(self, batch, batch_idx=None):
         self.iter_step += 1
@@ -1133,7 +1166,7 @@ class PromoterModule(GeneralModule):
                 print(f'WARNING: xt.min(): {xt.min()}. Some values of xt do not lie on the simplex. There are we are {(xt<0).sum()} negative values in xt of shape {xt.shape} that are negative.')
                 xt = simplex_proj(xt)
 
-        return logits, x0
+        return logits, xt  # NOTE: this used to be x0; but it seems that it was a mistake
 
     @torch.no_grad()
     def on_validation_epoch_start(self) -> None:
@@ -1144,6 +1177,10 @@ class PromoterModule(GeneralModule):
             prefixes=['module.']))
         self.sei.to(self.device)
         self.generator = np.random.default_rng(seed=137)
+    
+    @torch.no_grad()
+    def on_test_epoch_start(self) -> None:
+        self.on_validation_epoch_start()
 
     def load_distill_model(self):
         with open(self.distill_ckpt_hparams) as f:
