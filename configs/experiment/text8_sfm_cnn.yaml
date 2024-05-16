@@ -30,6 +30,9 @@ model:
     manifold: sphere
   compile: false
   eval_ppl: true
+  gpt_nll_eval: true
+  eval_gpt_nll_every: 1
+  gpt_nll_samples: 512
 
 data:
   batch_size: 256

@@ -8,6 +8,7 @@ import numpy as np
 import tqdm
 from torchdiffeq import odeint
 from geoopt import Euclidean, Manifold as GManifold, ProductManifold
+from transformers import GPTJForCausalLM, AutoTokenizer
 from src.sfm import Manifold, NSimplex
 
 
@@ -240,3 +241,40 @@ def compute_exact_loglikelihood(
     except:
         traceback.print_exc()
         return torch.zeros(batch.shape[0]).to(batch)
+
+
+_gpt: GPTJForCausalLM | None = None
+_tokenizer: AutoTokenizer | None = None
+
+
+def _load_models(device) -> tuple[GPTJForCausalLM, AutoTokenizer]:
+    if _gpt is None:
+        _gpt = GPTJForCausalLM.from_pretrained(
+            "EleutherAI/gpt-j-6b",
+            revision="float16",
+            torch_dtype=torch.float16,
+        ).to(device)
+        _gpt.eval()
+    if _tokenizer is None:
+        _tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-j-6b")
+    return _gpt, _tokenizer
+
+
+@torch.no_grad()
+def eval_gpt_nll(
+    samples: list[str],
+    device="cuda",
+) -> float:
+    """
+    Evaluates the mean NLL of a list of samples using a pre-trained GPT model.
+
+    Parameters:
+        - `samples`: textual samples.
+    """
+    gpt, tokenizer = _load_models(device)
+    losses = []
+    for sample in samples:
+        input_ids = tokenizer(sample, return_tensors="pt").input_ids.to(device)
+        loss = gpt(input_ids, return_dict=True, labels=input_ids).loss
+        losses += [loss.item()]
+    return np.mean(losses)

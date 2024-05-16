@@ -17,6 +17,7 @@ from src.sfm import (
     OTSampler,
     compute_exact_loglikelihood,
     estimate_categorical_kl,
+    eval_gpt_nll,
     manifold_from_name,
     ot_train_step,
 )
@@ -91,6 +92,10 @@ class SFMModule(LightningModule):
         eval_ppl: bool = False,
         eval_ppl_every: int = 10,
         normalize_loglikelihood: bool = False,
+        # GPT NLL?
+        gpt_nll_eval: bool = False,
+        eval_gpt_nll_every: int = 10,
+        gpt_nll_samples: int = 512,
     ):
         """
         :param net: The model to train.
@@ -128,9 +133,16 @@ class SFMModule(LightningModule):
         self.kl_samples = kl_samples
         self.debug_grads = debug_grads
         self.inference_steps = inference_steps
+        # PPL
         self.eval_ppl = eval_ppl
         self.eval_ppl_every = eval_ppl_every
         self.normalize_loglikelihood = normalize_loglikelihood
+        # GPT NLL
+        self.eval_gpt_nll = gpt_nll_eval
+        self.gpt_nll_every = eval_gpt_nll_every
+        self.gpt_nll_samples = gpt_nll_samples
+
+        # retrobridge:
         self.retrobridge = datamodule is not None
         self.retrobridge_eval_every = retrobridge_eval_every
 
@@ -456,6 +468,21 @@ class SFMModule(LightningModule):
             X=to_one_hot(X), E=to_one_hot(E), y=y,
         ).mask(node_mask, collapse=True)
 
+    def produce_text_samples(self, n: int) -> list[str]:
+        """
+        Produces `n` text samples.
+        """
+        samples = self.manifold.tangent_euler(
+            self.manifold.uniform_prior(n, 256, 28).to(self.device),
+            self.net,
+            self.inference_steps,
+        )
+        chars = samples.argmax(dim=-1).cpu()
+        rets = []
+        for sample in chars:
+            rets += ["".join([self.trainer.datamodule.itos[c] for c in sample])]
+        return rets
+
     def training_step(
         self, x_1: torch.Tensor | list[torch.Tensor] | Batch, batch_idx: int,
     ) -> torch.Tensor:
@@ -537,6 +564,12 @@ class SFMModule(LightningModule):
         if self.dataset_infos is not None and (self.trainer.current_epoch + 1) % self.retrobridge_eval_every == 0:
             # evaluate retrobridge
             self.retrobridge_eval()
+        if self.eval_gpt_nll and (self.trainer.current_epoch + 1) % self.gpt_nll_every == 0:
+            nll = eval_gpt_nll(
+                self.produce_text_samples(self.gpt_nll_samples),
+                self.device,
+            )
+            self.log("val/gpt-nll", nll, on_step=False, on_epoch=True, prog_bar=True)
 
     def test_step(self, x_1: torch.Tensor | list[torch.Tensor], batch_idx: int):
         """Perform a single test step on a batch of data from the test set.

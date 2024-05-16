@@ -15,6 +15,7 @@ from .manifold import (
 from .distribution import (
     compute_exact_loglikelihood,
     estimate_categorical_kl,
+    eval_gpt_nll,
     set_seeds,
 )
 from .misc import (
