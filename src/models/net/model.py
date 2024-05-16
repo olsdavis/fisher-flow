@@ -800,7 +800,8 @@ class CNNModel(nn.Module):
             feat = self.linear(seq)
             feat = feat.permute(0, 2, 1)
         else:
-            t = t.squeeze()
+            if len(t.shape) > 1:
+                t = t.squeeze()
             time_emb = F.relu(self.time_embedder(t))
             feat = seq.permute(0, 2, 1)
             feat = F.relu(self.linear(feat))

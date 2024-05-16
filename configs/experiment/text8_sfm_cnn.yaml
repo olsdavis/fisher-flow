@@ -29,9 +29,10 @@ model:
     dim: ${data.dim}
     manifold: sphere
   compile: false
+  eval_ppl: true
 
 data:
-  batch_size: 512
+  batch_size: 256
   k: 256
   dim: 28
 

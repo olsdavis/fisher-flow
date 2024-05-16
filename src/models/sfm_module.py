@@ -15,6 +15,7 @@ from tqdm import tqdm
 
 from src.sfm import (
     OTSampler,
+    compute_exact_loglikelihood,
     estimate_categorical_kl,
     manifold_from_name,
     ot_train_step,
@@ -86,6 +87,10 @@ class SFMModule(LightningModule):
         samples_to_generate: int = 128,
         samples_per_input: int = 5,
         retrobridge_eval_every: int = 10,
+        # ppl
+        eval_ppl: bool = False,
+        eval_ppl_every: int = 10,
+        normalize_loglikelihood: bool = False,
     ):
         """
         :param net: The model to train.
@@ -113,6 +118,7 @@ class SFMModule(LightningModule):
         self.train_loss = MeanMetric()
         self.val_loss = MeanMetric()
         self.test_loss = MeanMetric()
+        self.val_ppl = MeanMetric()
         self.sp_mse = MeanMetric()
         self.test_sp_mse = MeanMetric()
         self.min_grad = MinMetric()
@@ -122,6 +128,9 @@ class SFMModule(LightningModule):
         self.kl_samples = kl_samples
         self.debug_grads = debug_grads
         self.inference_steps = inference_steps
+        self.eval_ppl = eval_ppl
+        self.eval_ppl_every = eval_ppl_every
+        self.normalize_loglikelihood = normalize_loglikelihood
         self.retrobridge = datamodule is not None
         self.retrobridge_eval_every = retrobridge_eval_every
 
@@ -156,7 +165,12 @@ class SFMModule(LightningModule):
                 domain_features=self.domain_features,
                 use_context=use_context,
             )
-            self.val_molecular_metrics = SamplingMolecularMetrics(self.dataset_infos, datamodule.train_smiles,)
+            self.val_molecular_metrics = SamplingMolecularMetrics(
+                self.dataset_infos,
+                datamodule.train_smiles,
+            )
+        else:
+            self.dataset_infos = None
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Perform a forward pass through the model `self.net`."""
@@ -167,6 +181,7 @@ class SFMModule(LightningModule):
         # by default lightning executes validation step sanity checks before training starts,
         # so it's worth to make sure validation metrics don't store results from these checks
         self.val_loss.reset()
+        self.val_ppl.reset()
         self.sp_mse.reset()
 
     def model_step(
@@ -308,10 +323,9 @@ class SFMModule(LightningModule):
             target = target.unsqueeze(0)
         # assert self.manifold.all_belong_tangent(x_t, target)
         return x_t, target
-    
+
     def retrobridge_eval(self):
         """Evaluation metrics for retrobridge."""
-        print("BROTHER MEC")
         samples_left_to_generate = self.samples_to_generate
 
         samples = []
@@ -496,6 +510,13 @@ class SFMModule(LightningModule):
             mse = self.compute_sp_mse(x_1, signal, batch_idx)
             self.sp_mse(mse)
             self.log("val/sp-mse", self.sp_mse, on_step=False, on_epoch=True, prog_bar=True)
+        if self.eval_ppl and (self.trainer.current_epoch + 1) % self.eval_ppl_every == 0:
+            ppl = compute_exact_loglikelihood(
+                self.net, x_1, self.manifold.sphere, normalize_loglikelihood=self.normalize_loglikelihood,
+                num_steps=self.inference_steps,
+            ).mean()
+            self.val_ppl(ppl)
+            self.log("val/ppl", self.val_ppl, on_step=False, on_epoch=True, prog_bar=True)
 
     def on_validation_epoch_end(self) -> None:
         """Lightning hook that is called when a validation epoch ends."""

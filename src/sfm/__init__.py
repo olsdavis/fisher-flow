@@ -13,6 +13,7 @@ from .manifold import (
     str_to_ot_method,
 )
 from .distribution import (
+    compute_exact_loglikelihood,
     estimate_categorical_kl,
     set_seeds,
 )
