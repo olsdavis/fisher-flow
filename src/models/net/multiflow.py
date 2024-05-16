@@ -234,7 +234,6 @@ class GPT(nn.Module):
             x1_tok_emb = self.transformer.wte(x1) # token embeddings of shape (b, t, n_embd)
             tok_emb = self.xt_x1_proj(torch.cat([tok_emb, x1_tok_emb], dim=-1))
 
-        assert time.shape == (b,)
         if self.config.proper_timestep_emb:
             time_emb = transformer_timestep_embedding(time * 1000, n_embd)
         else:
@@ -260,7 +259,12 @@ class GPT(nn.Module):
         """
         # parameter naming fix
         idx = x
-        time = t.squeeze()
+        if len(t.shape) == 0:
+            # odeint is on
+            t = t[None].expand(idx.size(0))
+        if len(t) > 1:
+            t = t.squeeze()
+        time = t
         # existing code:
         b, t, _ = idx.size()
         assert (time < 1.1).all() # 0 to 1 not 0 to 1000
