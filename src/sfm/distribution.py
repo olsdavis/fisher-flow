@@ -243,11 +243,12 @@ def compute_exact_loglikelihood(
         return torch.zeros(batch.shape[0]).to(batch)
 
 
-_gpt: GPTJForCausalLM | None = None
-_tokenizer: AutoTokenizer | None = None
+_gpt = None
+_tokenizer = None
 
 
 def _load_models(device) -> tuple[GPTJForCausalLM, AutoTokenizer]:
+    global _gpt, _tokenizer
     if _gpt is None:
         _gpt = GPTJForCausalLM.from_pretrained(
             "EleutherAI/gpt-j-6b",

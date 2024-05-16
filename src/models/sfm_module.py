@@ -480,7 +480,7 @@ class SFMModule(LightningModule):
         chars = samples.argmax(dim=-1).cpu()
         rets = []
         for sample in chars:
-            rets += ["".join([self.trainer.datamodule.itos[c] for c in sample])]
+            rets += ["".join([self.trainer.datamodule.itos[c.item()] for c in sample])]
         return rets
 
     def training_step(
