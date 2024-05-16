@@ -310,15 +310,17 @@ class SFMModule(LightningModule):
         return x_t, target
     
     def retrobridge_eval(self):
-        """Evaluation metrics for retrobridge."""
-        print("BROTHER MEC")
         samples_left_to_generate = self.samples_to_generate
+        samples_left_to_save = 0# self.samples_to_save
+        chains_left_to_save = self.chains_to_save
 
         samples = []
         grouped_samples = []
+        # grouped_scores = []
         ground_truth = []
 
         ident = 0
+        print(f'Sampling epoch={self.current_epoch}')
 
         dataloader = self.trainer.datamodule.val_dataloader()
         for data in tqdm(dataloader, total=samples_left_to_generate // dataloader.batch_size):
@@ -328,31 +330,47 @@ class SFMModule(LightningModule):
             data = data.to(self.device)
             bs = len(data.batch.unique())
             to_generate = bs
+            to_save = min(samples_left_to_save, bs)
+            chains_save = min(chains_left_to_save, bs)
             batch_groups = []
-            ground_truth.extend(
-                retrobridge_utils.create_true_reactant_molecules(data, batch_size=bs)
-            )
-            for _ in range(self.samples_per_input):
-                mol_batch = self.sample_molecule(
+            # batch_scores = []
+            for sample_idx in range(self.samples_per_input):
+                """molecule_list, true_molecule_list, products_list, scores, _, _ = self.sample_batch(
                     data=data,
-                )
-                molecule_list = retrobridge_utils.create_pred_reactant_molecules(
-                    mol_batch.X, mol_batch.E, data.batch, batch_size=bs,
-                )
+                    batch_id=ident,
+                    batch_size=to_generate,
+                    save_final=to_save,
+                    keep_chain=chains_save,
+                    number_chain_steps_to_save=self.number_chain_steps_to_save,
+                    sample_idx=sample_idx,
+                )"""
+                mol_sample = self.sample_molecule(data)
+                molecule_list = retrobridge_utils.create_pred_reactant_molecules(mol_sample.X, mol_sample.E, data.batch, bs)
                 samples.extend(molecule_list)
                 batch_groups.append(molecule_list)
+                # batch_scores.append(scores)
+                if sample_idx == 0:
+                    ground_truth.extend(
+                        retrobridge_utils.create_true_reactant_molecules(data, bs)
+                    )
 
             ident += to_generate
+            samples_left_to_save -= to_save
             samples_left_to_generate -= to_generate
+            chains_left_to_save -= chains_save
 
             # Regrouping sampled reactants for computing top-N accuracy
             for mol_idx_in_batch in range(bs):
                 mol_samples_group = []
+                mol_scores_group = []
+                # for batch_group, scores_group in zip(batch_groups, batch_scores):
                 for batch_group in batch_groups:
                     mol_samples_group.append(batch_group[mol_idx_in_batch])
+                    # mol_scores_group.append(scores_group[mol_idx_in_batch])
 
                 assert len(mol_samples_group) == self.samples_per_input
                 grouped_samples.append(mol_samples_group)
+                # grouped_scores.append(mol_scores_group)
 
         to_log = compute_retrosynthesis_metrics(
             grouped_samples=grouped_samples,
@@ -427,19 +445,23 @@ class SFMModule(LightningModule):
             t += dt
         # X and E, flattened, are on the sphere; so we can determine the
         # last coordinate that we removed
-        # that is useful to determine whether the edge/node is present or
+        # it is useful to determine whether the edge/node is present or
         # not at all
-        def to_one_hot(tensor: torch.Tensor):
+        def to_one_hot(tensor: torch.Tensor, dummy_cls: int):
             orig_shape = tensor.shape
             tensor = tensor.reshape(orig_shape[0], -1, orig_shape[-1])
             remaining = tensor.square().sum(dim=-1, keepdim=True)
             combined = torch.cat([tensor, (1.0 - remaining).sqrt()], dim=-1)
             argmax = combined.argmax(dim=-1)
             ret = F.one_hot(argmax, num_classes=combined.shape[-1])
-            ret[argmax == combined.shape[-1] - 1, :] = 0
+            mask = argmax == combined.shape[-1] - 1
+            ret[mask, :] = 0
+            ret[mask, :][..., dummy_cls] = 1
             return ret[:, :, :-1].reshape(orig_shape)
         return PlaceHolder(
-            X=to_one_hot(X), E=to_one_hot(E), y=y,
+            X=to_one_hot(X, self.dataset_infos.atom_encoder["*"]),
+            E=to_one_hot(E, 0),
+            y=y,
         ).mask(node_mask, collapse=True)
 
     def training_step(
@@ -513,7 +535,7 @@ class SFMModule(LightningModule):
                 inference_steps=self.inference_steps,
             )
             self.log("val/kl", kl, on_step=False, on_epoch=True, prog_bar=True)
-        if self.dataset_infos is not None and (self.trainer.current_epoch + 1) % self.retrobridge_eval_every == 0:
+        if self.dataset_infos is not None and (self.retrobridge_eval_every == 1 or (self.trainer.current_epoch + 1) % self.retrobridge_eval_every == 0):
             # evaluate retrobridge
             self.retrobridge_eval()
 

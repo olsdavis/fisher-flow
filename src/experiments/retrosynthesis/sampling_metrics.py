@@ -395,6 +395,8 @@ def compute_retrosynthesis_metrics(grouped_samples, ground_truth, atom_decoder, 
             except RuntimeError as e:
                 print("Error encountered when trying to produce")
                 print(e)
+                import ipdb
+                ipdb.set_trace()
                 sampled_smi = None
             if sampled_smi is None:
                 continue
