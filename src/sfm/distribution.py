@@ -254,6 +254,7 @@ def _load_models(device) -> tuple[GPTJForCausalLM, AutoTokenizer]:
             "EleutherAI/gpt-j-6b",
             revision="float16",
             torch_dtype=torch.float16,
+            cache_dir="./cache",
         ).to(device)
         _gpt.eval()
     if _tokenizer is None:

@@ -13,21 +13,25 @@ class Text8Dataset(torch.utils.data.IterableDataset):
     """
     Adapted from `https://github.com/andrew-cr/discrete_flow_models/blob/main/train.py`
     """
-    def __init__(self, dataset: torch.Tensor, vocab_size: int, block_size: int, split: str = 'train'):
+    def __init__(self, dataset: torch.Tensor, vocab_size: int, block_size: int, one_hot: bool, split: str = 'train'):
         super().__init__()
         self.dataset = dataset.long()  # dataset is a Tensor
         self.vocab_size = vocab_size
         self.block_size = block_size
         self.split = split
+        self.one_hot = one_hot
 
     def __len__(self) -> int:
         return self.dataset.size(0)
 
     def __iter__(self):
         for i in range(len(self)):
-            one_hot = nn.functional.one_hot(self.dataset[i], self.vocab_size).float()
-            # if there is a need to smooth labels, it is done in the model's training step
-            yield one_hot
+            if self.one_hot:
+                one_hot = nn.functional.one_hot(self.dataset[i], self.vocab_size).float()
+                # if there is a need to smooth labels, it is done in the model's training step
+                yield one_hot
+            else:
+                yield self.dataset[i].float()
 
 
 class Text8DataModule(LightningDataModule):
@@ -40,6 +44,7 @@ class Text8DataModule(LightningDataModule):
         k: int = 256,
         dim: int = 27,
         data_dir: str = "data/text8",
+        one_hot: bool = True,
         train_val_test_split: tuple[int, int, int] = (55_000, 5_000, 10_000),
         batch_size: int = 64,
         num_workers: int = 0,
@@ -60,6 +65,7 @@ class Text8DataModule(LightningDataModule):
         self.save_hyperparameters(logger=False)
         # corresponds to window size
         self.k = k
+        self.one_hot = one_hot
 
         self.data_dir = data_dir
 
@@ -109,9 +115,9 @@ class Text8DataModule(LightningDataModule):
         assert len(val_block) > self.hparams.train_val_test_split[1] + self.hparams.train_val_test_split[2]
         data_val = val_block[:self.hparams.train_val_test_split[2]]
         data_test = val_block[self.hparams.train_val_test_split[2]:self.hparams.train_val_test_split[1] + self.hparams.train_val_test_split[2]]
-        self.data_train = Text8Dataset(torch.stack(data_train), self.meta_vocab_size, self.k, "train")
-        self.data_val = Text8Dataset(torch.stack(data_val), self.meta_vocab_size, self.k, "val")
-        self.data_test = Text8Dataset(torch.stack(data_test), self.meta_vocab_size, self.k, "test")
+        self.data_train = Text8Dataset(torch.stack(data_train), self.meta_vocab_size, self.k, self.one_hot, "train")
+        self.data_val = Text8Dataset(torch.stack(data_val), self.meta_vocab_size, self.k, self.one_hot, "val")
+        self.data_test = Text8Dataset(torch.stack(data_test), self.meta_vocab_size, self.k, self.one_hot, "test")
 
     def setup(self, stage: str | None = None) -> None:
         """

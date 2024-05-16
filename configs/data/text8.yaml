@@ -5,3 +5,4 @@ num_workers: 64
 pin_memory: true
 k: 256
 batch_size : 256
+one_hot: true
