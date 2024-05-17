@@ -194,7 +194,7 @@ class DNAModule(GeneralModule):
         print_freq: int = 100,
         validate: bool = False,
     ):
-        super().__init__(validate=validate, print_freq=print_freq)  
+        super().__init__(validate=validate, print_freq=print_freq)
         self.save_hyperparameters(logger=False)
         self.kl_samples = kl_samples
         self.cls_guidance = cls_guidance
