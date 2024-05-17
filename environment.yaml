@@ -55,6 +55,7 @@ dependencies:
     - cooltools==0.7.0
     - torchdiffeq==0.2.3
     - transformers==4.40.2
+    - schedulefree==1.2.5
     - hydra-optuna-sweeper
     - hydra-colorlog
     - rootutils

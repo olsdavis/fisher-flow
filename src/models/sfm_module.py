@@ -11,6 +11,7 @@ from torchmetrics import MeanMetric, MinMetric, MaxMetric
 from torch_ema import ExponentialMovingAverage
 from torch_geometric.data import Batch
 from tqdm import tqdm
+import schedulefree
 
 
 from src.sfm import (
@@ -96,6 +97,8 @@ class SFMModule(LightningModule):
         gpt_nll_eval: bool = False,
         eval_gpt_nll_every: int = 10,
         gpt_nll_samples: int = 512,
+        # misc
+        fast_matmul: bool = False,
     ):
         """
         :param net: The model to train.
@@ -183,6 +186,8 @@ class SFMModule(LightningModule):
             )
         else:
             self.dataset_infos = None
+        if fast_matmul:
+            torch.set_float32_matmul_precision("high")
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Perform a forward pass through the model `self.net`."""
@@ -195,6 +200,24 @@ class SFMModule(LightningModule):
         self.val_loss.reset()
         self.val_ppl.reset()
         self.sp_mse.reset()
+
+    def on_validation_epoch_start(self):
+        for optim in self.trainer.optimizers:
+            # schedule free needs to set to eval
+            if isinstance(optim, schedulefree.AdamWScheduleFree):
+                optim.eval()
+
+    def on_train_epoch_start(self):
+        for optim in self.trainer.optimizers:
+            # schedule free needs to set to train
+            if isinstance(optim, schedulefree.AdamWScheduleFree):
+                optim.train()
+
+    def on_test_epoch_start(self):
+        for optim in self.trainer.optimizers:
+            # schedule free needs to set to eval
+            if isinstance(optim, schedulefree.AdamWScheduleFree):
+                optim.eval()
 
     def model_step(
         self, x_1: torch.Tensor, signal: torch.Tensor | None = None,

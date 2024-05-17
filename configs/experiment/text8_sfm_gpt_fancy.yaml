@@ -5,7 +5,7 @@
 
 defaults:
   - override /data: text8
-  - override /model: text8_sfm_gpt
+  - override /model: text8_sfm_gpt_fancy
   - override /callbacks: default
   - override /trainer: default
 
@@ -20,6 +20,7 @@ trainer:
   min_epochs: 1
   max_epochs: 200
   gradient_clip_val: 1.0
+  accumulate_grad_batches: 4
 
 model:
   optimizer:
@@ -27,9 +28,6 @@ model:
   net:
     block_size: ${data.k}
     vocab_size: ${data.dim}
-    n_layer: 8
-    n_head: 8
-    n_embd: 512
   manifold: sphere
   compile: true
   eval_ppl: true
@@ -38,9 +36,13 @@ model:
   eval_ppl_every: 5
   gpt_nll_samples: 512
   ot_method: None
+  ema: true
+  ema_decay: 0.99
+  fast_matmul: true
+  inference_steps: 20
 
 data:
-  batch_size: 256
+  batch_size: 128
   k: 256
   dim: 28
 
