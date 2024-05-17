@@ -35,6 +35,7 @@ compile: false
 print_freq: 200
 
 cls_free_guidance: false
+
 guidance_scale: 3
 
 clean_cls_model: cnn

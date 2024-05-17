@@ -5,3 +5,4 @@ batch_size: 256 # Needs to be divisible by the number of devices (e.g., if in a 
 num_workers: 4
 pin_memory: false
 subset_train_as_val: true
+

@@ -54,6 +54,7 @@ data:
   dataset: "FlyBrain" # choices are "MEL2" and "FlyBrain" 47 classes and 81 classes
   #dataset: "MEL2" # choices are "MEL2" and "FlyBrain" 47 classes and 81 classes
 
+
 model_checkpoint:
   monitor: 'val_fxd_generated_to_allseqs' # val_perplexity
 

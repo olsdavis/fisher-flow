@@ -24,7 +24,6 @@ from src.dfm import (
     get_wasserstein_dist,
     update_ema,
 )
-
 from src.data.components import Sei, upgrade_state_dict
 from src.models.net import PromoterModel, CNNModel
 
@@ -194,7 +193,7 @@ class DNAModule(GeneralModule):
         print_freq: int = 100,
         validate: bool = False,
     ):
-        super().__init__(validate=validate, print_freq=print_freq)
+        super().__init__(validate=validate, print_freq=print_freq)  
         self.save_hyperparameters(logger=False)
         self.kl_samples = kl_samples
         self.cls_guidance = cls_guidance
@@ -378,7 +377,7 @@ class DNAModule(GeneralModule):
                 if self.taskiran_seq_path is not None:
                     indices = torch.randperm(len(self.taskiran_fly_seqs))[:B].to(self.device)
                     self.run_cls_model(self.taskiran_fly_seqs[indices].to(self.device), cls, log_dict=self.val_outputs, clean_data=True, postfix='_cleancls_taskiran', generated=True)
-        
+
         self.log('dur', time.time() - self.last_log_time)
         if not self.train_out_initialized and self.clean_cls_ckpt is not None:
             self.run_cls_model(seq, cls, log_dict=self.train_outputs, clean_data=True, postfix='_cleancls', generated=False, run_log=False)
@@ -1175,6 +1174,7 @@ class PromoterModule(GeneralModule):
                 xt = simplex_proj(xt)
 
         return logits, xt  # NOTE: this used to be x0; but it seems that it was a mistake
+
 
     @torch.no_grad()
     def on_validation_epoch_start(self) -> None:
