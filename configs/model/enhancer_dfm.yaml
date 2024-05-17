@@ -21,20 +21,20 @@ net:
   hidden: 128
   mode: dirichlet
   num_cls: 81 # output classes 47 for MEL
-  depth: 5
+  depth: 4
   dropout: 0.0
   prior_pseudocount: 2.0
-  cls_expanded_simplex: False
-  clean_data: False
-  classifier: False
-  classifier_free_guidance: False
+  cls_expanded_simplex: false
+  clean_data: false
+  classifier: false
+  classifier_free_guidance: false
 
 
 compile: false
 
 print_freq: 200
 
-cls_free_guidance: true
+cls_free_guidance: false
 guidance_scale: 3
 
 clean_cls_model: cnn
@@ -46,8 +46,8 @@ clean_cls_ckpt: workdir/clsDNAclean_cnn_1stack_2023-12-30_15-01-30/epoch=15-step
 target_class: 2
 
 allow_nan_cfactor: true
-all_class_inference: true
-probability_addition: true
+all_class_inference: false
+probability_addition: false
 
 sep_x_y: true # sep x anx y in general step like original DFM repo
 

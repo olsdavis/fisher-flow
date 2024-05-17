@@ -11,8 +11,22 @@ To run the dirichlet flow model on the promoter and enhancer dataset:
 python -m src.train experiment=promoter_dfm logger=wandb
 ```
 
+To test the dirichlet flow model on the promoter dataset:
+
+```py
+python -m src.eval experiment=promoter_dfm_test logger=wandb
+```
+
+To run the dirichlet flow model on the enhancer dataset:
+
 ```py
 python -m src.train experiment=enhancer_dfm logger=wandb
+```
+
+To test the dirichlet flow model on the enhancer dataset:
+
+```py
+TODO
 ```
 
 ## RetroBridge: Products and Reactants Experiment

@@ -167,7 +167,7 @@ class DNAModule(GeneralModule):
         prior_pseudocount: float = 2.0,
         cls_free_guidance: bool = False,
         binary_guidance: bool = False,
-        num_integration_steps: int = 20,
+        num_integration_steps: int = 100,
         scale_cls_score: bool = False,
         analytic_cls_score: bool = False,
         target_class: int = 0,
@@ -321,7 +321,7 @@ class DNAModule(GeneralModule):
             if self.stage == 'val':
                 seq_distill = torch.zeros_like(seq, device=self.device)
             else:
-                logits_distill, xt = self.dirichlet_flow_inference(seq, None, model=self.net)
+                logits_distill, xt = self.dirichlet_flow_inference(seq, cls, model=self.net)
                 seq_distill = torch.argmax(logits_distill, dim=-1)
             alphas = alphas * 0
         xt_inp = xt
@@ -352,7 +352,7 @@ class DNAModule(GeneralModule):
         #self.log('perplexity', torch.exp(losses.mean())[None].expand(B))
         if self.stage == "val":
             if self.mode == 'dirichlet':
-                logits_pred, _ = self.dirichlet_flow_inference(seq, None, model=self.net)
+                logits_pred, _ = self.dirichlet_flow_inference(seq, cls, model=self.net)
                 seq_pred = torch.argmax(logits_pred, dim=-1)
             elif self.mode == 'riemannian':
                 logits_pred = self.riemannian_flow_inference(seq)
@@ -378,8 +378,11 @@ class DNAModule(GeneralModule):
                 if self.taskiran_seq_path is not None:
                     indices = torch.randperm(len(self.taskiran_fly_seqs))[:B].to(self.device)
                     self.run_cls_model(self.taskiran_fly_seqs[indices].to(self.device), cls, log_dict=self.val_outputs, clean_data=True, postfix='_cleancls_taskiran', generated=True)
+        
+        self.log('dur', time.time() - self.last_log_time)
         if not self.train_out_initialized and self.clean_cls_ckpt is not None:
             self.run_cls_model(seq, cls, log_dict=self.train_outputs, clean_data=True, postfix='_cleancls', generated=False, run_log=False)
+        self.last_log_time = time.time()
         return losses
 
     @torch.no_grad()
@@ -628,7 +631,12 @@ class DNAModule(GeneralModule):
         self.inf_counter = 1
         self.nan_inf_counter = 0
 
+    @torch.no_grad()
+    def on_test_epoch_start(self) -> None:
+        self.on_validation_epoch_start()
+
     def on_validation_epoch_end(self):
+        #import pdb; pdb.set_trace()
         if self.trainer.is_global_zero:
             print("on_validation_epoch_end")
         self.generator = np.random.default_rng()
@@ -658,25 +666,25 @@ class DNAModule(GeneralModule):
 
         if self.clean_cls_ckpt:
             if not self.target_class == self.net.num_cls:
-                probs = torch.softmax(torch.cat(self.val_outputs['logits_cleancls_generated']), dim=-1)
+                probs = torch.softmax(torch.cat(self.val_outputs['logits_cleancls_generated']), dim=-1) # (10505, 81)
                 target_prob = probs[:, self.target_class]
                 mean_log.update({'cleancls_mean_target_prob': target_prob.detach().cpu().mean()})
             # calculate FID/FXD metrics:
-            embeds_gen = torch.cat(self.val_outputs['embeddings_cleancls_generated']).detach().cpu().numpy()
+            embeds_gen = torch.cat(self.val_outputs['embeddings_cleancls_generated']).detach().cpu().numpy() # (10505, 128)
             if not self.validate:
-                train_clss = torch.cat(self.train_outputs['clss_cleancls']).squeeze().detach().cpu().numpy()
-                train_embeds = torch.cat(self.train_outputs['embeddings_cleancls']).detach().cpu().numpy()
+                train_clss = torch.cat(self.train_outputs['clss_cleancls']).squeeze().detach().cpu().numpy() # (83726, )
+                train_embeds = torch.cat(self.train_outputs['embeddings_cleancls']).detach().cpu().numpy() # (83726, 128)
                 mean_log.update({'val_fxd_generated_to_allseqs_allTrainSet': get_wasserstein_dist(embeds_gen, train_embeds)})
                 if not self.target_class == self.net.num_cls:
-                    embeds_cls_specific = train_embeds[train_clss == self.target_class]
+                    embeds_cls_specific = train_embeds[train_clss == self.target_class] # (2562, 128)
                     mean_log.update({'val_fxd_generated_to_targetclsseqs_allTrainSet': get_wasserstein_dist(embeds_gen, embeds_cls_specific)})
-            clss = torch.cat(self.val_outputs['clss_cleancls']).squeeze().detach().cpu().numpy()
-            embeds = torch.cat(self.val_outputs['embeddings_cleancls']).detach().cpu().numpy()
+            clss = torch.cat(self.val_outputs['clss_cleancls']).squeeze().detach().cpu().numpy() # (10505, )
+            embeds = torch.cat(self.val_outputs['embeddings_cleancls']).detach().cpu().numpy() # (10505, 128)
             embeds_rand = torch.randint(0,4, size=embeds_gen.shape).numpy()
             mean_log.update({'val_fxd_randseq_to_allseqs': get_wasserstein_dist(embeds_rand, embeds)})
             mean_log.update({'val_fxd_generated_to_allseqs': get_wasserstein_dist(embeds_gen, embeds)})
             if not self.target_class == self.net.num_cls:
-                embeds_cls_specific = embeds[clss == self.target_class]
+                embeds_cls_specific = embeds[clss == self.target_class] # (326, 128)
                 mean_log.update({'val_fxd_generated_to_targetclsseqs': get_wasserstein_dist(embeds_gen, embeds_cls_specific)})
             if self.taskiran_seq_path is not None:
                 embeds_taskiran = torch.cat(self.val_outputs['embeddings_cleancls_taskiran']).detach().cpu().numpy()

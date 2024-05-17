@@ -758,14 +758,9 @@ class CNNModel(nn.Module):
                 inp_size += 1 # plus one for the mask token of these models
             self.linear = nn.Conv1d(inp_size, self.hidden, kernel_size=9, padding=4)
             self.time_embedder = nn.Sequential(
-                                                GaussianFourierProjection(
-                                                    embed_dim=self.hidden
-                                                    ),
-                                                nn.Linear(
-                                                    self.hidden,
-                                                    self.hidden
-                                                    )
-                                                )
+                GaussianFourierProjection(embed_dim=self.hidden),
+                nn.Linear(self.hidden, self.hidden),
+            )
 
         self.num_layers = 5 * self.depth
         self.convs = [nn.Conv1d(self.hidden, self.hidden, kernel_size=9, padding=4),
@@ -790,7 +785,7 @@ class CNNModel(nn.Module):
             self.cls_layers = nn.ModuleList([Dense(self.hidden, self.hidden) for _ in range(self.num_layers)])
 
     def forward(self, x, t: Tensor, cls = None, return_embedding=False):
-        seq = x.view(-1, self.k, self.dim)
+        seq = x#.view(-1, self.k, self.dim)
         if len(t.shape) == 0:
             # odeint is on
             t = t[None].expand(seq.size(0))

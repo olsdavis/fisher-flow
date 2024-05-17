@@ -12,7 +12,7 @@ defaults:
 # all parameters below will be merged with parameters from default configurations set above
 # this allows you to overwrite only specified parameters
 
-tags: ["enhancer"]
+tags: ["enhancer", "cnn"]
 
 seed: 12345
 
@@ -35,17 +35,17 @@ model:
   clean_cls_model: cnn
   mode: dirichlet
   net: 
-    hidden: 256
-    depth: 5
+    hidden: 128
+    depth: 4
     mode: dirichlet
-  cls_free_guidance: true
+  cls_free_guidance: false
   guidance_scale: 3
   clean_cls_ckpt_hparams: workdir/clsDNAclean_cnn_1stack_2023-12-30_15-01-30/lightning_logs/version_0/hparams.yaml
   clean_cls_ckpt: workdir/clsDNAclean_cnn_1stack_2023-12-30_15-01-30/epoch=15-step=10480.ckpt
   target_class: 2
   allow_nan_cfactor: true
-  all_class_inference: true
-  probability_addition: true
+  all_class_inference: false
+  probability_addition: false
 
 
 data:
@@ -62,6 +62,6 @@ logger:
     project: sfm
     tags: ${tags}
     group: enhancer
-    name: enhancer_dfm_val_B${data.batch_size}_wd${model.optimizer.weight_decay}_s${seed}
+    name: debug_enhancer_dfm_val_B${data.batch_size}_wd${model.optimizer.weight_decay}_s${seed}
   aim:
     experiment: "enhancer"

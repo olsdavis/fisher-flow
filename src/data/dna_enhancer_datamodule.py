@@ -81,6 +81,7 @@ class DNAEnhancerDataModule(LightningDataModule):
                 f"data_{name}",
                 dataset
             )
+            print(f"{name} len {len(dataset)}")
         
         if self.subset_train_as_val:
             val_set_size = len(self.data_val)
@@ -97,6 +98,7 @@ class DNAEnhancerDataModule(LightningDataModule):
             batch_size=self.batch_size_per_device,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
+            shuffle=True,
         )
 
     def val_dataloader(self) -> DataLoader[Any]:
@@ -104,9 +106,9 @@ class DNAEnhancerDataModule(LightningDataModule):
 
         :return: The validation dataloader.
         """
-        assert self.data_valid
+        assert self.data_val
         return DataLoader(
-            dataset=self.data_valid,
+            dataset=self.data_val,
             batch_size=self.batch_size_per_device,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,

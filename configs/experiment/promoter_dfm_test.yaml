@@ -14,7 +14,7 @@ defaults:
 
 tags: ["promoter_design", "promoter_model"]
 
-seed: 12345
+seed: 12349
 
 trainer:
   max_steps: 200000
@@ -40,8 +40,8 @@ logger:
     project: sfm
     tags: ${tags}
     group: promoter_design
-    name: promoter_design_dfm_fix_B${data.batch_size}_wd${model.optimizer.weight_decay}_s${seed}
+    name: TEST_promoter_design_dfm_fix_B${data.batch_size}_wd${model.optimizer.weight_decay}_s${seed}
   aim:
     experiment: "promoter_design"
 
-ckpt_path: /homes/44/skessler/simplex-flow/logs/train/runs/2024-05-10_12-54-49/checkpoints/epoch_006.ckpt
+ckpt_path: /homes/44/skessler/simplex-flow/logs/train/runs/2024-05-13_18-48-34/checkpoints/epoch_009.ckpt
