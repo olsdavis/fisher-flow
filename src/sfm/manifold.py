@@ -251,6 +251,19 @@ class Manifold(ABC):
         Projects the points `x` to the manifold.
         """
 
+    def masked_tangent_projection(self, p: Tensor, v: Tensor) -> Tensor:
+        """
+        Projects the tangent vector `v` to the tangent space of `p` only for batch
+        indices where `p` is on the manifold.
+        """
+        raise NotImplementedError()
+
+    def masked_projection(self, p: Tensor) -> Tensor:
+        """
+        Projects `p` only where points are non-zero.
+        """
+        raise NotImplementedError()
+
 
 class NSimplex(Manifold):
     """
@@ -552,6 +565,16 @@ class GeooptSphere(Manifold):
             return NSphere().make_tangent(p, v, missing_coordinate)
         p = self.project(p)
         return self.sphere.proju(p, v)
+
+    def masked_tangent_projection(self, p: Tensor, v: Tensor) -> Tensor:
+        mask = torch.isclose(p.square().sum(dim=-1), torch.tensor(1.0))
+        p[mask, :] = self.project(p[mask, :])
+        return self.sphere.proju(p, v)
+
+    def masked_projection(self, p: Tensor) -> Tensor:
+        mask = torch.isclose(p.square().sum(dim=-1), torch.tensor(0.0))
+        p[~mask, :] = self.project(p[~mask, :])
+        return p
 
     def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
         ret = self.sphere.random_uniform((n, k, d)).abs()

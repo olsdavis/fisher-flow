@@ -82,7 +82,6 @@ class SFMModule(LightningModule):
         number_chain_steps_to_save: int = 50,
         chains_to_save: int = 5,
         fix_product_nodes: bool = True,
-        lambda_train: list[int] = [5, 0],
         samples_to_generate: int = 128,
         samples_per_input: int = 5,
         retrobridge_eval_every: int = 10,
@@ -136,7 +135,6 @@ class SFMModule(LightningModule):
             self.number_chain_steps_to_save = number_chain_steps_to_save
             self.chains_to_save = chains_to_save
             self.fix_product_nodes = fix_product_nodes
-            self.lambda_train = lambda_train
             self.samples_to_generate = samples_to_generate
             self.samples_per_input = samples_per_input
             self.dataset_infos = RetroBridgeDatasetInfos(datamodule)
@@ -201,7 +199,6 @@ class SFMModule(LightningModule):
         product, p_node_mask = retrobridge_utils.to_dense(
             data.p_x, data.p_edge_index, data.p_edge_attr, data.batch,
         )
-        #retrobridge_utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)[0].E.sum(dim=-1)
         product = product.mask(p_node_mask)
 
         t = torch.rand(data.batch_size, 1, device=data.x.device)
@@ -209,26 +206,34 @@ class SFMModule(LightningModule):
         # product is prior, reactants is targret
         # now, need to train over product of these buggers
 
-        # encode no edges as 1 in last dimension
-        start_e = self.encode_empty_cat(product.E)
-        end_e = self.encode_empty_cat(reactants.E)
+        target_edge_shape = (product.E.size(0), -1, product.E.size(-1))
         edges_t, edges_target = self.compute_target(
-            start_e,
-            end_e,
+            product.E.reshape(target_edge_shape),
+            reactants.E.reshape(target_edge_shape),
             t,
         )
-        # same for features
-        start_f = self.encode_empty_cat(product.X)
-        end_f = self.encode_empty_cat(reactants.X)
+        edges_t = edges_t.reshape_as(product.E)
+        edges_target = edges_target.reshape_as(product.E)
+        # symmetrise edges_t, edges_target
+        edges_t = self.symmetrise_edges(edges_t)
+        edges_target = self.symmetrise_edges(edges_target)
         feats_t, feats_target = self.compute_target(
-            start_f,
-            end_f,
+            product.X,
+            reactants.X,
             t,
         )
+        # mask things not included
+        feats_t, edges_t = self.mask_like_placeholder(p_node_mask, feats_t, edges_t)
+        feats_target, edges_target = self.mask_like_placeholder(
+            p_node_mask,
+            feats_target,
+            edges_target,
+        )
+        # define data
         noisy_data = {
             "t": t,
-            "E_t": edges_t[:, :, :, :-1],  # remove last item
-            "X_t": feats_t[:, :, :-1],  # remove last item
+            "E_t": edges_t,
+            "X_t": feats_t,
             "y": product.y,
             "y_t": product.y,
             "node_mask": r_node_mask,
@@ -240,14 +245,20 @@ class SFMModule(LightningModule):
 
         pred = self.retrobridge_forward(noisy_data, extra_data, r_node_mask)
         # have two targets, need two projections
-        loss_x = (self.manifold.make_tangent(feats_t, pred.X, missing_coordinate=True) - feats_target).square().sum(dim=(-1, -2))
+        loss_x_raw = (self.manifold.masked_tangent_projection(feats_t, pred.X) - feats_target)
         # reshape for B, K, D shape
         edges_t = edges_t.reshape(edges_t.size(0), -1, edges_t.size(-1))
         pred_reshaped = pred.E.reshape(pred.E.size(0), -1, pred.E.size(-1))
-        loss_edges = (
-            self.manifold.make_tangent(edges_t, pred_reshaped, missing_coordinate=True) - edges_target.reshape_as(edges_t)
-        ).square().sum(dim=(-1, -2))
-        loss = (loss_x + loss_edges).mean()
+        loss_edges_raw = (
+            self.manifold.masked_tangent_projection(edges_t, pred_reshaped) - edges_target.reshape_as(edges_t)
+        )
+        loss_edges_raw = loss_edges_raw.reshape_as(product.E)
+
+        final_X, final_E = self.mask_like_placeholder(p_node_mask, loss_x_raw, loss_edges_raw)
+        loss = (
+            final_X.square().sum(dim=(-1, -2))
+            + final_E.square().sum(dim=(-1, -2, -3))
+        ).mean()
         return loss
 
     def retrobridge_forward(self, noisy_data: dict[str, Any], extra_data: PlaceHolder, node_mask: torch.Tensor) -> torch.Tensor:
@@ -263,6 +274,14 @@ class SFMModule(LightningModule):
         no_cat_pad = torch.zeros(*tensor.shape[:-1], 1).to(tensor)
         no_cat_pad[tensor.sum(dim=-1) == 0] = 1
         return torch.cat([no_cat_pad, tensor], dim=-1)
+
+    def symmetrise_edges(self, E: torch.Tensor) -> torch.Tensor:
+        """
+        Symmetrises the edges tensor.
+        """
+        i, j = torch.triu_indices(E.size(1), E.size(2))
+        E[:, i, j, :] = E[:, j, i, :]
+        return E
 
     def compute_extra_data(self, noisy_data, context=None, condition_on_t=True):
         """ At every training step (after adding noise) and step in sampling, compute extra information and append to
@@ -283,6 +302,32 @@ class SFMModule(LightningModule):
             t = noisy_data['t']
             extra_y = torch.cat((extra_y, t), dim=1)
         return PlaceHolder(X=extra_X, E=extra_E, y=extra_y)
+
+    def set_zero_diag(self, E: torch.Tensor) -> torch.Tensor:
+        """
+        Sets the diagonal of `E` to all zeros. Taken from `retrobridge_utils`.
+        """
+        diag = torch.eye(E.shape[1], dtype=torch.bool).unsqueeze(0).expand(E.shape[0], -1, -1)
+        E[diag] = 0
+        return E
+
+    def mask_like_placeholder(self, node_mask: torch.Tensor, X: torch.Tensor, E: torch.Tensor, collapse: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
+        x_mask = node_mask.unsqueeze(-1)
+        e_mask1 = x_mask.unsqueeze(2)
+        e_mask2 = x_mask.unsqueeze(1)
+
+        if collapse:
+            X = torch.argmax(X, dim=-1)
+            E = torch.argmax(E, dim=-1)
+
+            X[node_mask == 0] = - 1
+            E[(e_mask1 * e_mask2).squeeze(-1) == 0] = - 1
+        else:
+            X[node_mask == 0, :] = 0
+            E[~((e_mask1 * e_mask2).squeeze(-1)), :] = 0
+            E = self.set_zero_diag(E)
+            # assert torch.allclose(E, torch.transpose(E, 1, 2))
+        return X, E
 
     def compute_target(
         self,
@@ -420,47 +465,29 @@ class SFMModule(LightningModule):
             }
             extra_data = self.compute_extra_data(noisy_data, context=context)
             pred = self.retrobridge_forward(noisy_data, extra_data, node_mask)
-            # put on simplex
-            E = self.encode_empty_cat(pred.E)
-            X = self.encode_empty_cat(pred.X)
             # prep
             target_edge_shape = (E.size(0), -1, E.size(-1))
             # make a step
             X = self.manifold.exp_map(
-                X, self.manifold.make_tangent(X, pred.X, missing_coordinate=True) * dt,
+                X, self.manifold.make_tangent(X, pred.X) * dt,
             )
-            X = self.manifold.project(X)[:, :, :-1]
+            X = self.manifold.project(X)
             E = E.reshape(target_edge_shape)
             E = self.manifold.exp_map(
                 E,
-                self.manifold.make_tangent(
+                self.manifold.masked_tangent_projection(
                     E,
                     pred.E.reshape((pred.E.size(0), -1, pred.E.size(-1))),
-                    missing_coordinate=True,
                 ) * dt,
             )
-            E = self.manifold.project(E)
-            E = E.reshape(*orig_edge_shape[:-1], orig_edge_shape[-1] + 1)[:, :, :, :-1]
+            E = self.manifold.masked_projection(E)
             y = pred.y
             t += dt
-        # X and E, flattened, are on the sphere; so we can determine the
-        # last coordinate that we removed
-        # it is useful to determine whether the edge/node is present or
-        # not at all
-        def to_one_hot(tensor: torch.Tensor, dummy_cls: int):
-            orig_shape = tensor.shape
-            tensor = tensor.reshape(orig_shape[0], -1, orig_shape[-1])
-            remaining = tensor.square().sum(dim=-1, keepdim=True)
-            combined = torch.cat([tensor, (1.0 - remaining).sqrt()], dim=-1)
-            argmax = combined.argmax(dim=-1)
-            ret = F.one_hot(argmax, num_classes=combined.shape[-1])
-            mask = argmax == combined.shape[-1] - 1
-            ret[mask, :] = 0
-            ret[mask, :][..., dummy_cls] = 1
-            return ret[:, :, :-1].reshape(orig_shape)
+            E = E.reshape(orig_edge_shape)
+            X, E = self.mask_like_placeholder(node_mask, X, E)
         return PlaceHolder(
-            X=to_one_hot(X, self.dataset_infos.atom_encoder["*"]),
-            E=to_one_hot(E, 0),
+            X=X,
+            E=E,
             y=y,
         ).mask(node_mask, collapse=True)
 
