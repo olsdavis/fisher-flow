@@ -8,4 +8,4 @@
 #SBATCH --qos=medium
 #SBATCH --gres=gpu:4
 conda activate sfm
-python -m src.train experiment=text8_sfm_gpt_fancy trainer=ddp trainer.devices=4 data.batch_size=256 logger=wandb
+python -m src.train experiment=text8_sfm_gpt_fancy trainer=ddp trainer.devices=4 data.batch_size=128 logger=wandb

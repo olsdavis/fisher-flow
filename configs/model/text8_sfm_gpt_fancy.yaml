@@ -1,12 +1,16 @@
 _target_: src.models.SFMModule
 
 optimizer:
-  _target_: schedulefree.AdamWScheduleFree
+  _target_: torch.optim.AdamW
   _partial_: true
   lr: 0.001
   weight_decay: 0.0
 
-scheduler: null
+scheduler:
+  _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+  _partial_: true
+  T_max: 1000
+  eta_min: 0.00008
 
 net:
   _target_: src.models.net.GPT

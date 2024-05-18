@@ -25,11 +25,13 @@ trainer:
 model:
   optimizer:
     lr: 0.001
+  scheduler:
+    T_max: ${trainer.max_epochs}
   net:
     block_size: ${data.k}
     vocab_size: ${data.dim}
   manifold: sphere
-  compile: true
+  compile: false
   eval_ppl: true
   gpt_nll_eval: true
   eval_gpt_nll_every: 5
