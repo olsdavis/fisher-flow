@@ -75,8 +75,14 @@ class Text8DataModule(LightningDataModule):
 
         self.batch_size_per_device = batch_size
 
-    def prepare_data(self):
+    def prepare_data(self) -> None:
         """Nothing to download."""
+
+    def setup(self, stage: str | None = None) -> None:
+        """
+        Load data. Set variables: `self.data_train`, `self.data_val`, `self.data_test`.
+        """
+
         data_dir = self.data_dir
         meta_path = os.path.join(data_dir, 'meta.pkl')
         print(f"loading meta from {meta_path}")
@@ -118,11 +124,6 @@ class Text8DataModule(LightningDataModule):
         self.data_train = Text8Dataset(torch.stack(data_train), self.meta_vocab_size, self.k, self.one_hot, "train")
         self.data_val = Text8Dataset(torch.stack(data_val), self.meta_vocab_size, self.k, self.one_hot, "val")
         self.data_test = Text8Dataset(torch.stack(data_test), self.meta_vocab_size, self.k, self.one_hot, "test")
-
-    def setup(self, stage: str | None = None) -> None:
-        """
-        Load data. Set variables: `self.data_train`, `self.data_val`, `self.data_test`.
-        """
         # Divide batch size by the number of devices.
         if self.trainer is not None:
             if self.hparams.batch_size % self.trainer.world_size != 0:
