@@ -157,6 +157,8 @@ class SFMModule(LightningModule):
                 use_context=use_context,
             )
             self.val_molecular_metrics = SamplingMolecularMetrics(self.dataset_infos, datamodule.train_smiles,)
+        else:
+            self.dataset_infos = None
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Perform a forward pass through the model `self.net`."""
@@ -455,7 +457,8 @@ class SFMModule(LightningModule):
         if isinstance(x_1, list):
             x_1, signal = x_1
             # Only one of the two signal inputs is used (the first one)
-            signal = signal[:, :, 0].unsqueeze(-1)
+            if len(signal.shape) == 2:
+                signal = signal[:, :, 0].unsqueeze(-1)
             loss = self.model_step(x_1, signal)
         elif isinstance(x_1, Batch):
             loss = self.retrobridge_step(x_1)
@@ -482,7 +485,8 @@ class SFMModule(LightningModule):
         if isinstance(x_1, list):
             x_1, signal = x_1
             # Only one of the two signal inputs is used (the first one)
-            signal = signal[:, :, 0].unsqueeze(-1)
+            if len(signal.shape) == 2:
+                signal = signal[:, :, 0].unsqueeze(-1)
             loss = self.model_step(x_1, signal)
         elif isinstance(x_1, Batch):
             loss = self.retrobridge_step(x_1)
@@ -527,7 +531,8 @@ class SFMModule(LightningModule):
         if isinstance(x_1, list):
             x_1, signal = x_1
             # Only one of the two signal inputs is used (the first one)
-            signal = signal[:, :, 0].unsqueeze(-1)
+            if len(signal.shape) == 2:
+                signal = signal[:, :, 0].unsqueeze(-1)
             loss = self.model_step(x_1, signal)
         elif isinstance(x_1, Batch):
             loss = self.retrobridge_step(x_1)
