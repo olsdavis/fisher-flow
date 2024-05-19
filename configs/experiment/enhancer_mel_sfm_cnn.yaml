@@ -18,7 +18,7 @@ seed: 12345
 
 trainer:
   min_epochs: 1
-  max_epochs: 1000
+  max_epochs: 800
   gradient_clip_val: 1.0
 
 model:
@@ -28,20 +28,27 @@ model:
     k: 500
     dim: 4
     activation: lrelu
+    depth: 4
+    hidden: 128
+    dropout: 0.0
   compile: false
   manifold: sphere
+  ot_method: exact
+  fbd_every: 10
   eval_fbd: true
   mel_or_dna: true  # MEL
   fbd_classifier_path: "workdir/clsMELclean_cnn_dropout02_2023-12-31_12-26-28/epoch=9-step=5540.ckpt"
   inference_steps: 25
 
 data:
-  batch_size: 1024
+  batch_size: 512
   dataset: MEL2
 
 logger:
   wandb:
     tags: ${tags}
-    group: "toy_dfm"
+    name: enhancer_mel_s${seed}
+    group: "enhancer"
+    project: enhancer
   aim:
-    experiment: "toy_dfm"
+    experiment: "enhancer_mel"

@@ -75,6 +75,7 @@ class SFMModule(LightningModule):
         datamodule: Any = None,  # in retrobridge
         # enhancer
         eval_fbd: bool = False,
+        fbd_every: int = 10,
         mel_or_dna: bool = True,  # if True, then MEL; if not Fly Brain DNA
         fbd_classifier_path: str | None = None,
         # retobridge parameters:
@@ -132,6 +133,7 @@ class SFMModule(LightningModule):
 
         # enhancer
         self.eval_fbd = eval_fbd
+        self.fbd_every = fbd_every
         if eval_fbd:
             self.fbd = FBD(
                 dim=4,
@@ -525,7 +527,7 @@ class SFMModule(LightningModule):
             mse = self.compute_sp_mse(x_1, signal, batch_idx)
             self.sp_mse(mse)
             self.log("val/sp-mse", self.sp_mse, on_step=False, on_epoch=True, prog_bar=True)
-        if self.eval_fbd:
+        if self.eval_fbd and (self.current_epoch + 1) % self.fbd_every == 0:
             self.val_fbd(self.compute_fbd(x_1, signal, batch_idx))
             self.log("val/fbd", self.val_fbd, on_step=False, on_epoch=True, prog_bar=True)
 
