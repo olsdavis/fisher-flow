@@ -32,7 +32,7 @@ def ot_train_step(
     m: Manifold,
     model: nn.Module,
     sampler: OTSampler | None,
-    signal: Tensor | None = None,
+    extra_args: dict[str, Tensor] | None = None,
     closed_form_drv: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor]:
     """
@@ -55,7 +55,7 @@ def ot_train_step(
     t = torch.rand((b, 1), device=x_1.device)
     x_0 = m.uniform_prior(b, k, d).to(x_1.device)
     return cft_loss_function(
-        x_0, x_1, t, m, model, sampler, signal=signal, closed_form_drv=closed_form_drv,
+        x_0, x_1, t, m, model, sampler, extra_args=extra_args, closed_form_drv=closed_form_drv,
     )
 
 
@@ -66,7 +66,7 @@ def cft_loss_function(
     m: Manifold,
     model: nn.Module,
     sampler: OTSampler | None,
-    signal: Tensor | None = None,
+    extra_args: dict[str, Tensor] | None = None,
     closed_form_drv: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor]:
     """
@@ -106,16 +106,7 @@ def cft_loss_function(
         assert m.all_belong_tangent(x_t, target)
 
     # now calculate diffs
-    if signal is not None:
-        out = model(x=x_t, signal=signal, t=t)
-    else:
-        out = model(x=x_t, t=t)
-    # from torch.nn import functional as F
-    # if not m.all_belong_tangent(x_t, out):
-    # print_stats(m.square_norm_at(x_t, out), "output")
-    # print_stats(m.square_norm_at(x_t, target), "target")
-    # print_stats(F.cosine_similarity(x_t.reshape(x_t.size(0), -1), out.reshape(out.size(0), -1)), "cos")
+    out = model(x=x_t, t=t, **(extra_args or {}))
 
-    # assert m.all_belong_tangent(x_t, target)
     diff = out - target
     return diff.square().sum(dim=(-1, -2)).mean(), out, target
