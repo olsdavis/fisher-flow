@@ -33,9 +33,10 @@ model:
   eval_fbd: true
   mel_or_dna: true  # MEL
   fbd_classifier_path: "workdir/clsMELclean_cnn_dropout02_2023-12-31_12-26-28/epoch=9-step=5540.ckpt"
+  inference_steps: 25
 
 data:
-  batch_size: 128
+  batch_size: 1024
   dataset: MEL2
 
 logger:
