@@ -5,7 +5,7 @@ python -m src.train experiment=toy_dfm_sfm_cnn
 ```
 ## Promoter and Enhancer DNA Experiment
 
-To run the dirichlet flow model on the promoter and enhancer dataset:
+To run the dirichlet flow model on the promoter dataset:
 
 ```py
 python -m src.train experiment=promoter_dfm logger=wandb
@@ -17,18 +17,25 @@ To test the dirichlet flow model on the promoter dataset:
 python -m src.eval experiment=promoter_dfm_test logger=wandb
 ```
 
-To run the dirichlet flow model on the enhancer dataset:
+To run the dirichlet flow model and test it on the fly brain enhancer dataset:
 
 ```py
 python -m src.train experiment=enhancer_dfm logger=wandb
+python -m src.eval experiment=enhancer_dfm_test logger=wandb
 ```
 
-To test the dirichlet flow model on the enhancer dataset:
+To run the dirichlet flow model on the Melanoma enhancer dataset:
 
 ```py
-TODO
+python -m src.train experiment=enhancer_dfm_mel logger=wandb
+python -m src.eval experiment=enhancer_dfm_mel_test logger=wandb
 ```
 
+To run the fisher flows on the fly brain enhancer dataset:
+
+```py
+python -m src.train experiment=enhancer_sfm logger=wandb
+```
 
 ## RetroBridge: Products and Reactants Experiment
 

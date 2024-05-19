@@ -176,6 +176,7 @@ class SFMModule(GeneralModule):
         cls_ckpt_hparams: str | None = None,
         clean_cls_ckpt_hparams: str | None = None,
         clean_cls_model: str = 'cnn',
+        cls_model: str = 'cnn',
         cls_ckpt: str | None = None,
         clean_cls_ckpt: str | None = None,
         target_class: int = 0,
@@ -194,9 +195,10 @@ class SFMModule(GeneralModule):
         self.smoothing = label_smoothing if label_smoothing and label_smoothing > 1e-6 else None
         self.tangent_euler = tangent_euler
         self.manifold = manifold_from_name(manifold)
-        self.net = TangentWrapper(self.manifold, net).to(self.device)
+        self.net = net
+        self.tangent_net = TangentWrapper(self.manifold, net).to(self.device)
         if ema:
-            self.ema = ExponentialMovingAverage(self.net.parameters(), decay=ema_decay).to(self.device)
+            self.ema = ExponentialMovingAverage(self.tangent_net.parameters(), decay=ema_decay).to(self.device)
         else:
             self.ema = None
         self.sampler = OTSampler(self.manifold, ot_method) if ot_method != "None" else None
@@ -213,6 +215,7 @@ class SFMModule(GeneralModule):
         self.debug_grads = debug_grads
         self.inference_steps = inference_steps
         self.crossent_loss = torch.nn.CrossEntropyLoss(reduction='none')
+        self.loaded_classifiers = False
 
         self.dataset_type = dataset_type
         self.validate = validate
@@ -220,16 +223,20 @@ class SFMModule(GeneralModule):
         self.cls_ckpt_hparams = cls_ckpt_hparams
         self.clean_cls_ckpt_hparams = clean_cls_ckpt_hparams
         self.clean_cls_model = clean_cls_model
+        self.cls_model = cls_model
         self.cls_ckpt = cls_ckpt
         self.clean_cls_ckpt = clean_cls_ckpt
         self.target_class = target_class
+        self.train_out_initialized = False
+
+        self.mean_log_ema = {}
 
     def on_load_checkpoint(self, checkpoint):
         checkpoint['state_dict'] = {k: v for k,v in checkpoint['state_dict'].items() if 'cls_model' not in k and 'distill_model' not in k}
 
-    # def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-    #     """Perform a forward pass through the model `self.net`."""
-    #     return self.net(x, t)
+    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        """Perform a forward pass through the model `self.tangent_net`."""
+        return self.tangent_net(x, t)
 
     def on_train_start(self):
         """Lightning hook that is called when training begins."""
@@ -249,7 +256,7 @@ class SFMModule(GeneralModule):
         return ot_train_step(
             self.manifold.smooth_labels(x_1, mx=self.smoothing) if self.smoothing else x_1,
             self.manifold,
-            self.net,
+            self.tangent_net,
             self.sampler,
             signal=signal,
             closed_form_drv=False,
@@ -266,9 +273,14 @@ class SFMModule(GeneralModule):
         :return: A tensor of losses between model predictions and targets.
         """
         self.stage = 'train'
+        import pdb; pdb.set_trace()
         if isinstance(batch, list):
             seq, signal = batch
-            loss = self.model_step(seq, signal)
+            signal = None # set to None for now
+            if seq.dim() == 2:
+                seq = F.one_hot(seq, num_classes=self.net.dim).to(torch.float32)
+                seq = seq.permute(0, 2, 1)
+            loss = self.model_step(seq.to(torch.float32), signal)
         else:
             seq = batch
             loss = self.model_step(seq)
@@ -286,7 +298,11 @@ class SFMModule(GeneralModule):
         """
         if isinstance(batch, list):
             seq, signal = batch
-            loss = self.model_step(seq, signal)
+            signal = None # set to None for now
+            if seq.dim() == 2:
+                seq = F.one_hot(seq, num_classes=self.net.dim).to(torch.float32)
+                seq = seq.permute(0, 2, 1)
+            loss = self.model_step(seq.to(torch.float32), signal)
         else:
             seq = batch
             loss = self.model_step(seq)
@@ -296,7 +312,7 @@ class SFMModule(GeneralModule):
         self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log('val/perplexity', torch.exp(loss.mean())[None].expand(seq.size(0)).mean())
         if self.dataset_type == 'promoter':
-            eval_model = partial(self.net, signal=signal)
+            eval_model = partial(self.tangent_net, signal=signal)
             pred = self.manifold.tangent_euler(
                 self.manifold.uniform_prior(*seq.shape[:-1], 4).to(seq.device),
                 eval_model,
@@ -321,7 +337,11 @@ class SFMModule(GeneralModule):
         """
         if isinstance(batch, list):
             seq, signal = batch
-            loss = self.model_step(seq, signal)
+            signal = None # set to None for now
+            if seq.dim() == 2:
+                seq = F.one_hot(seq, num_classes=self.net.dim)
+                seq = seq.permute(0, 2, 1)
+            loss = self.model_step(seq.to(torch.float32), signal)
         else:
             seq = batch
             loss = self.model_step(seq)
@@ -331,7 +351,7 @@ class SFMModule(GeneralModule):
         self.log("test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log('test/perplexity', torch.exp(loss.mean())[None].expand(seq.size(0)).mean())
         if self.dataset_type == 'promoter':
-            eval_model = partial(self.net, signal=signal)
+            eval_model = partial(self.tangent_net, signal=signal)
             pred = self.manifold.tangent_euler(
                 self.manifold.uniform_prior(*seq.shape[:-1], 4).to(seq.device),
                 eval_model,
@@ -372,7 +392,7 @@ class SFMModule(GeneralModule):
             # evaluate KL
             real_probs = self.trainer.val_dataloaders.dataset.probs.to(self.device)
             kl = estimate_categorical_kl(
-                self.net,
+                self.tangent_net,
                 self.manifold,
                 real_probs,
                 self.kl_samples // 10,
@@ -402,6 +422,7 @@ class SFMModule(GeneralModule):
                     'iter_step': float(self.iter_step),
                 }
             )
+
             if self.clean_cls_ckpt:
                 if not self.target_class == self.net.num_cls:
                     probs = torch.softmax(torch.cat(self.val_outputs['logits_cleancls_generated']), dim=-1) # (10505, 81)
@@ -450,7 +471,7 @@ class SFMModule(GeneralModule):
         B = seq.size(0)
 
         if self.stage == "val":
-            eval_model = partial(self.net, signal=signal)
+            eval_model = partial(self.tangent_net, signal=signal)
             pred = self.manifold.tangent_euler(
                 self.manifold.uniform_prior(*seq.shape[:-1], self.net.dim).to(seq.device),
                 eval_model,
@@ -458,10 +479,11 @@ class SFMModule(GeneralModule):
                 tangent=self.tangent_euler,
             )
             seq_pred = torch.argmax(pred, dim=-1)
+
             self.val_outputs['seqs'].append(seq_pred.cpu())
-            if self.cls_ckpt is not None:
+            #if self.cls_ckpt is not None:
                 #self.run_cls_model(seq_pred, cls, log_dict=self.val_outputs, clean_data=False, postfix='_noisycls_generated', generated=True)
-                self.run_cls_model(seq, signal, log_dict=self.val_outputs, clean_data=False, postfix='_noisycls', generated=False)
+                # self.run_cls_model(seq, signal, log_dict=self.val_outputs, clean_data=False, postfix='_noisycls', generated=False)
             if self.clean_cls_ckpt is not None:
                 self.run_cls_model(seq_pred, signal, log_dict=self.val_outputs, clean_data=True, postfix='_cleancls_generated', generated=True)
                 self.run_cls_model(seq, signal, log_dict=self.val_outputs, clean_data=True, postfix='_cleancls', generated=False)
@@ -476,13 +498,14 @@ class SFMModule(GeneralModule):
 
     @torch.no_grad()
     def run_cls_model(self, seq, cls, log_dict, clean_data=False, postfix='', generated=False, run_log=True):
+        assert clean_data == True
         cls = cls.squeeze()
         if generated:
             cls = (torch.ones_like(cls,device=self.device) * self.target_class).long()
 
-        xt, alphas = xxx #sample_cond_prob_path(self.mode, self.fix_alpha, self.alpha_scale, seq, self.net.dim)
+        xt, alphas = None, None #sample_cond_prob_path(self.mode, self.fix_alpha, self.alpha_scale, seq, self.net.dim)
         if self.cls_expanded_simplex:
-            xt, _ = xxx #expand_simplex(xt, alphas, self.prior_pseudocount)
+            xt = xt # expand_simplex(xt, alphas, self.prior_pseudocount)
 
         cls_model = self.clean_cls_model if clean_data else self.cls_model
         logits, embeddings = cls_model(xt if not clean_data else seq, t=alphas, return_embedding=True)
@@ -497,10 +520,12 @@ class SFMModule(GeneralModule):
         log_dict[f'embeddings{postfix}'].append(embeddings.detach().cpu())
         log_dict[f'clss{postfix}'].append(cls.detach().cpu())
         log_dict[f'logits{postfix}'].append(logits.detach().cpu())
-        log_dict[f'alphas{postfix}'].append(alphas.detach().cpu())
+        #log_dict[f'alphas{postfix}'].append(alphas.detach().cpu())
         if not clean_data and not self.target_class == self.net.num_cls: # num_cls stands for the masked class
-            scores = self.get_cls_score(xt, alphas)
-            log_dict[f'scores{postfix}'].append(scores.detach().cpu())
+            # let's ignore logging of the scores
+            pass
+            # scores = self.get_cls_score(xt, alphas)
+            # log_dict[f'scores{postfix}'].append(scores.detach().cpu())
 
     def on_validation_epoch_start(self):
         if not self.loaded_classifiers:
@@ -522,7 +547,7 @@ class SFMModule(GeneralModule):
     
     def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
         if self.debug_grads:
-            norms = grad_norm(self.net, norm_type=2).values()
+            norms = grad_norm(self.tangent_net, norm_type=2).values()
             self.min_grad(min(norms))
             self.max_grad(max(norms))
             self.mean_grad(sum(norms) / len(norms))
@@ -536,7 +561,7 @@ class SFMModule(GeneralModule):
             # evaluate KL
             real_probs = self.trainer.test_dataloaders.dataset.probs.to(self.device)
             kl = estimate_categorical_kl(
-                self.net,
+                self.tangent_net,
                 self.manifold,
                 real_probs,
                 self.kl_samples,
@@ -632,7 +657,7 @@ class SFMModule(GeneralModule):
         :param stage: Either `"fit"`, `"validate"`, `"test"`, or `"predict"`.
         """
         if self.hparams.compile and stage == "fit":
-            self.net = torch.compile(self.net)
+            self.tangent_net = torch.compile(self.tangent_net)
 
     def configure_optimizers(self) -> dict[str, Any]:
         """Choose what optimizers and learning-rate schedulers to use in your optimization.
@@ -643,7 +668,7 @@ class SFMModule(GeneralModule):
 
         :return: A dict containing the configured optimizers and learning-rate schedulers to be used for training.
         """
-        optimizer = self.hparams.optimizer(params=self.net.parameters())
+        optimizer = self.hparams.optimizer(params=self.tangent_net.parameters())
         if self.hparams.scheduler is not None:
             scheduler = self.hparams.scheduler(optimizer=optimizer)
             return {

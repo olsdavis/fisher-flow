@@ -784,9 +784,9 @@ class CNNModel(nn.Module):
             self.cls_embedder = nn.Embedding(num_embeddings=self.num_cls + 1, embedding_dim=self.hidden)
             self.cls_layers = nn.ModuleList([Dense(self.hidden, self.hidden) for _ in range(self.num_layers)])
 
-    def forward(self, x, t: Tensor, cls = None, return_embedding=False):
+    def forward(self, x, t: Tensor | None, cls = None, return_embedding=False):
         seq = x#.view(-1, self.k, self.dim)
-        if len(t.shape) == 0:
+        if len(t.shape) == 0 and t is not None:
             # odeint is on
             t = t[None].expand(seq.size(0))
         if self.clean_data:

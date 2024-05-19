@@ -27,8 +27,8 @@ model:
   optimizer:
     lr: 0.001
   net:
-    k: ${data.k}
-    dim: ${data.dim}
+    #k: ${data.k}
+    dim: ${data.k}
     activation: lrelu
   compile: false
   manifold: sphere

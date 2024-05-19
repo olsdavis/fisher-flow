@@ -22,7 +22,7 @@ trainer:
   gradient_clip_val: 1.0
   check_val_every_n_epoch: 10
   accelerator: 'gpu'
-  devices: [2]
+  devices: [3]
 
 model:
   optimizer:
@@ -55,6 +55,6 @@ logger:
     project: sfm
     tags: ${tags}
     group: enhancer
-    name: enhancer_sfm_s${seed}
+    name: enhancer_sfm_${data.dataset}_s${seed}
   aim:
     experiment: "enhancer"

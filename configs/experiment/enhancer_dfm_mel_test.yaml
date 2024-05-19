@@ -1,0 +1,74 @@
+# @package _global_
+
+# to execute this experiment run:
+# python train.py experiment=example
+
+defaults:
+  - override /data: enhancer
+  - override /model: enhancer_dfm
+  - override /callbacks: default
+  - override /trainer: default
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+
+tags: ["enhancer", "cnn"]
+
+seed: 12345
+
+trainer:
+  max_steps: 450000
+  max_epochs: 100000
+  limit_train_batches: null
+  gradient_clip_val: 1.0
+  check_val_every_n_epoch: 10
+  accelerator: 'gpu'
+  devices: [3]
+
+model:
+  compile: false
+  num_integration_steps: 100
+  print_freq: 200
+  dataset_type: enhancer
+  cls_model: cnn
+  clean_cls_model: cnn
+  mode: dirichlet
+  net: 
+    hidden: 128
+    depth: 4
+    mode: dirichlet
+    #num_cls: 81 # output classes 47 for MEL
+    num_cls: 47 # output classes 47 for MEL
+  cls_free_guidance: false
+  guidance_scale: 3
+  #clean_cls_ckpt_hparams: workdir/clsDNAclean_cnn_1stack_2023-12-30_15-01-30/lightning_logs/version_0/hparams.yaml
+  #clean_cls_ckpt: workdir/clsDNAclean_cnn_1stack_2023-12-30_15-01-30/epoch=15-step=10480.ckpt
+  clean_cls_ckpt_hparams: workdir/clsMELclean_cnn_dropout02_2023-12-31_12-26-28/lightning_logs/version_0/hparams.yaml
+  clean_cls_ckpt: workdir/clsMELclean_cnn_dropout02_2023-12-31_12-26-28/epoch=9-step=5540.ckpt
+  target_class: 2
+  allow_nan_cfactor: true
+  all_class_inference: false
+  probability_addition: false
+
+data:
+  batch_size: 256
+  #dataset: "FlyBrain" # choices are "MEL2" and "FlyBrain" 47 classes and 81 classes
+  dataset: "MEL2" # choices are "MEL2" and "FlyBrain" 47 classes and 81 classes
+
+model_checkpoint:
+  monitor: 'val_fxd_generated_to_allseqs' # val_perplexity
+
+logger:
+  wandb:
+    project: sfm
+    tags: ${tags}
+    group: enhancer
+    name: TEST_enhancer_dfm_${data.dataset}_s${seed}
+  aim:
+    experiment: "enhancer"
+
+ckpt_path: /homes/44/skessler/simplex-flow/logs/train/runs/2024-05-17_17-16-41/checkpoints/epoch_409.ckpt
+#ckpt_path: /homes/44/skessler/simplex-flow/logs/train/runs/2024-05-17_17-17-16/checkpoints/epoch_729.ckpt
+#ckpt_path: /homes/44/skessler/simplex-flow/logs/train/runs/2024-05-17_17-18-45/checkpoints/epoch_719.ckpt
+#ckpt_path: /homes/44/skessler/simplex-flow/logs/train/runs/2024-05-17_17-19-38/checkpoints/epoch_839.ckpt
+#ckpt_path: /homes/44/skessler/simplex-flow/logs/train/runs/2024-05-17_17-19-58/checkpoints/epoch_689.ckpt

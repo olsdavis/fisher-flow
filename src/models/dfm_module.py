@@ -717,6 +717,10 @@ class DNAModule(GeneralModule):
             # print("on_validation_epoch_end_end")
             pass
 
+    @torch.no_grad()
+    def on_test_epoch_end(self) -> None:
+        self.on_validation_epoch_end()
+
     def on_train_start(self) -> None:
         self.val_loss.reset()
 
