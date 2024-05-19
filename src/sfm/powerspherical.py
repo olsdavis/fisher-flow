@@ -103,6 +103,7 @@ class MarginalTDistribution(torch.distributions.TransformedDistribution):
                 (dim - 1) / 2 + scale, (dim - 1) / 2, validate_args=validate_args
             ),
             transforms=torch.distributions.AffineTransform(loc=-1, scale=2),
+            validate_args=validate_args,
         )
 
     def entropy(self):
@@ -169,6 +170,7 @@ class PowerSpherical(torch.distributions.TransformedDistribution):
                 ),
             ),
             [_TTransform(), _HouseholderRotationTransform(loc),],
+            validate_args=validate_args,
         )
 
 

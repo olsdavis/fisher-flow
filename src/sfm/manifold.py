@@ -121,8 +121,8 @@ class Manifold(ABC):
         Returns:
             The geodesic interpolant at time `t`.
         """
-        assert self.all_belong(x_0)
-        assert self.all_belong(x_1)
+        # assert self.all_belong(x_0)
+        # assert self.all_belong(x_1)
         t = t.unsqueeze(-1)
         x_t = self.exp_map(x_0, t * self.log_map(x_0, x_1))
         return self.project(x_t)

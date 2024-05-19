@@ -29,6 +29,7 @@ model:
   compile: false
   inference_steps: 100
   stochastic: false
+  closed_form_drv: false
 
 data:
   batch_size: 64

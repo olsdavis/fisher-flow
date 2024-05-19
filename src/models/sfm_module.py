@@ -86,6 +86,7 @@ class SFMModule(LightningModule):
         ema: bool = False,
         ema_decay: float = 0.99,
         tangent_euler: bool = True,
+        closed_form_drv: bool = False,
         debug_grads: bool = False,
         inference_steps: int = 100,
         # stochasticity!
@@ -118,6 +119,7 @@ class SFMModule(LightningModule):
         # if basically zero or zero
         self.smoothing = label_smoothing if label_smoothing and label_smoothing > 1e-6 else None
         self.tangent_euler = tangent_euler
+        self.closed_form_drv = closed_form_drv
         self.promoter_eval = promoter_eval
         self.manifold = manifold_from_name(manifold)
         self.stochastic = stochastic
@@ -201,7 +203,7 @@ class SFMModule(LightningModule):
             self.net,
             self.sampler,
             signal=signal,
-            closed_form_drv=False,
+            closed_form_drv=self.closed_form_drv,
             stochastic=self.stochastic,
         )[0]
 
@@ -359,22 +361,34 @@ class SFMModule(LightningModule):
         """
         Computes flow-matching target; returns point and target itself.
         """
-        with torch.inference_mode(False):
-            # https://github.com/facebookresearch/riemannian-fm/blob/main/manifm/model_pl.py
-            if self.stochastic:
-                def cond_u(x0, x1, t):
-                    path = perturbed_geodesic(self.manifold.sphere, x0, x1)
-                    x_t, u_t = jvp(path, (t,), (torch.ones_like(t).to(t),))
-                    return x_t, u_t
-                x_t, target = vmap(cond_u)(x_0, x_1, t)
-            else:
-                def cond_u(x0, x1, t):
-                    path = geodesic(self.manifold.sphere, x0, x1)
-                    x_t, u_t = jvp(path, (t,), (torch.ones_like(t).to(t),))
-                    return x_t, u_t
-                x_t, target = vmap(cond_u)(x_0, x_1, t)
-        x_t = x_t.squeeze()
-        target = target.squeeze()
+        if not self.closed_form_drv:
+            with torch.inference_mode(False):
+                if self.stochastic:
+                    raise NotImplementedError("Stochastic closed-form not implemented.")
+                # https://github.com/facebookresearch/riemannian-fm/blob/main/manifm/model_pl.py
+                    def cond_u(x0, x1, t):
+                        path = perturbed_geodesic(self.manifold.sphere, x0, x1)
+                        x_t, u_t = jvp(path, (t,), (torch.ones_like(t).to(t),))
+                        return x_t, u_t
+                    x_t, target = vmap(cond_u)(x_0, x_1, t)
+                else:
+                    def cond_u(x0, x1, t):
+                        path = geodesic(self.manifold.sphere, x0, x1)
+                        x_t, u_t = jvp(path, (t,), (torch.ones_like(t).to(t),))
+                        return x_t, u_t
+                    x_t, target = vmap(cond_u)(x_0, x_1, t)
+            x_t = x_t.squeeze()
+            target = target.squeeze()
+        else:
+            mask = torch.isclose(x_0.square().sum(dim=-1), torch.tensor(1.0))
+            x_t = torch.zeros_like(x_0)
+            x_t[mask] = self.manifold.geodesic_interpolant(x_0, x_1, t)[mask]
+            x_t[mask] = metropolis_sphere_perturbation(
+                x_t, default_perturbation_schedule(t)
+            )[mask]
+            target = torch.zeros_like(x_t)
+            target[mask] = self.manifold.log_map(x_0, x_1)[mask]
+            target[mask] = self.manifold.parallel_transport(x_0, x_t, target)[mask]
         if x_0.size(0) == 1:
             # squeezing will remove the batch
             x_t = x_t.unsqueeze(0)
