@@ -18,6 +18,8 @@ from src.sfm import (
     estimate_categorical_kl,
     manifold_from_name,
     ot_train_step,
+    metropolis_sphere_perturbation,
+    default_perturbation_schedule,
 )
 from src.models.net import TangentWrapper
 from src.data.components.promoter_eval import SeiEval
@@ -49,6 +51,21 @@ def geodesic(manifold, start_point, end_point):
     return path
 
 
+def perturbed_geodesic(manifold, start_point, end_point):
+    shooting_tangent_vec = manifold.logmap(start_point, end_point)
+    def path_perturbed(t):
+        """Generate parameterized function for geodesic curve.
+        Parameters
+        ----------
+        t : array-like, shape=[n_points,]
+            Times at which to compute points of the geodesics.
+        """
+        tangent_vecs = torch.einsum("i,...k->...ik", t, shooting_tangent_vec)
+        points_at_time_t = manifold.expmap(start_point.unsqueeze(-2), tangent_vecs)
+        return metropolis_sphere_perturbation(points_at_time_t, default_perturbation_schedule(t))
+    return path_perturbed
+
+
 class SFMModule(LightningModule):
     """
     Module for the Toy DFM dataset.
@@ -71,6 +88,8 @@ class SFMModule(LightningModule):
         tangent_euler: bool = True,
         debug_grads: bool = False,
         inference_steps: int = 100,
+        # stochasticity!
+        stochastic: bool = False,
         datamodule: Any = None,  # in retrobridge
         # retobridge parameters:
         input_dims: dict = {'X': 40, 'E': 10, 'y': 12},
@@ -84,7 +103,7 @@ class SFMModule(LightningModule):
         fix_product_nodes: bool = True,
         samples_to_generate: int = 128,
         samples_per_input: int = 5,
-        retrobridge_eval_every: int = 10,
+        retrobridge_eval_every: int = 5,
     ):
         """
         :param net: The model to train.
@@ -101,6 +120,7 @@ class SFMModule(LightningModule):
         self.tangent_euler = tangent_euler
         self.promoter_eval = promoter_eval
         self.manifold = manifold_from_name(manifold)
+        self.stochastic = stochastic
         # don't wrap for retrobridge!
         self.net = TangentWrapper(self.manifold, net).to(self.device) if not datamodule else net
         if ema:
@@ -182,6 +202,7 @@ class SFMModule(LightningModule):
             self.sampler,
             signal=signal,
             closed_form_drv=False,
+            stochastic=self.stochastic,
         )[0]
 
     def retrobridge_step(
@@ -215,8 +236,8 @@ class SFMModule(LightningModule):
         edges_t = edges_t.reshape_as(product.E)
         edges_target = edges_target.reshape_as(product.E)
         # symmetrise edges_t, edges_target
-        edges_t = self.symmetrise_edges(edges_t)
-        edges_target = self.symmetrise_edges(edges_target)
+        # edges_t = self.symmetrise_edges(edges_t)
+        # edges_target = self.symmetrise_edges(edges_target)
         feats_t, feats_target = self.compute_target(
             product.X,
             reactants.X,
@@ -340,11 +361,18 @@ class SFMModule(LightningModule):
         """
         with torch.inference_mode(False):
             # https://github.com/facebookresearch/riemannian-fm/blob/main/manifm/model_pl.py
-            def cond_u(x0, x1, t):
-                path = geodesic(self.manifold.sphere, x0, x1)
-                x_t, u_t = jvp(path, (t,), (torch.ones_like(t).to(t),))
-                return x_t, u_t
-            x_t, target = vmap(cond_u)(x_0, x_1, t)
+            if self.stochastic:
+                def cond_u(x0, x1, t):
+                    path = perturbed_geodesic(self.manifold.sphere, x0, x1)
+                    x_t, u_t = jvp(path, (t,), (torch.ones_like(t).to(t),))
+                    return x_t, u_t
+                x_t, target = vmap(cond_u)(x_0, x_1, t)
+            else:
+                def cond_u(x0, x1, t):
+                    path = geodesic(self.manifold.sphere, x0, x1)
+                    x_t, u_t = jvp(path, (t,), (torch.ones_like(t).to(t),))
+                    return x_t, u_t
+                x_t, target = vmap(cond_u)(x_0, x_1, t)
         x_t = x_t.squeeze()
         target = target.squeeze()
         if x_0.size(0) == 1:
@@ -390,13 +418,13 @@ class SFMModule(LightningModule):
                     sample_idx=sample_idx,
                 )"""
                 mol_sample = self.sample_molecule(data)
-                molecule_list = retrobridge_utils.create_pred_reactant_molecules(mol_sample.X, mol_sample.E, data.batch, bs)
+                molecule_list = retrobridge_utils.create_pred_reactant_molecules(mol_sample.X, mol_sample.E, data.batch, to_generate)
                 samples.extend(molecule_list)
                 batch_groups.append(molecule_list)
                 # batch_scores.append(scores)
                 if sample_idx == 0:
                     ground_truth.extend(
-                        retrobridge_utils.create_true_reactant_molecules(data, bs)
+                        retrobridge_utils.create_true_reactant_molecules(data, to_generate)
                     )
 
             ident += to_generate
@@ -432,7 +460,7 @@ class SFMModule(LightningModule):
 
         self.val_molecular_metrics.reset()
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def sample_molecule(
         self,
         data: Batch,
@@ -454,13 +482,15 @@ class SFMModule(LightningModule):
         context = product.clone() if self.use_context else None
         orig_edge_shape = E.shape
         # start!
-        for _ in range(self.inference_steps):
+        for i in range(self.inference_steps):
+            if self.stochastic and not (i == 0 or i == self.inference_steps - 1):
+                X = metropolis_sphere_perturbation(X, default_perturbation_schedule(t))
+                E = metropolis_sphere_perturbation(E, default_perturbation_schedule(t))
             noisy_data = {
                 "t": t,
                 "E_t": E,
                 "X_t": X,
-                "y": y,
-                "y_t": product.y,
+                "y_t": y,
                 "node_mask": node_mask,
             }
             extra_data = self.compute_extra_data(noisy_data, context=context)
@@ -485,6 +515,8 @@ class SFMModule(LightningModule):
             t += dt
             E = E.reshape(orig_edge_shape)
             X, E = self.mask_like_placeholder(node_mask, X, E)
+
+        # E = self.symmetrise_edges(E)
         return PlaceHolder(
             X=X,
             E=E,

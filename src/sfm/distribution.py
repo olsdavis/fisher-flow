@@ -2,7 +2,6 @@
 import random
 import torch
 from torch import Tensor, nn
-from torch.distributions.dirichlet import Dirichlet
 import numpy as np
 import tqdm
 from src.sfm import Manifold, NSimplex

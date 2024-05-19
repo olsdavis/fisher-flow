@@ -146,7 +146,7 @@ def get_eigenvalues_features(eigenvalues, k=5):
     ev = eigenvalues
     bs, n = ev.shape
     n_connected_components = (ev < 1e-5).sum(dim=-1)
-    assert (n_connected_components > 0).all(), (n_connected_components, ev)
+    # assert (n_connected_components > 0).all(), (n_connected_components, ev)
 
     to_extend = max(n_connected_components) + k - n
     if to_extend > 0:

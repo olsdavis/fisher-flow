@@ -392,11 +392,9 @@ def compute_retrosynthesis_metrics(grouped_samples, ground_truth, atom_decoder, 
             sampled_mol = build_molecule(sample[0], sample[1], atom_decoder)
             try:
                 sampled_smi = Chem.MolToSmiles(sampled_mol)
-            except RuntimeError as e:
+            except (ValueError, RuntimeError) as e:
                 print("Error encountered when trying to produce")
                 print(e)
-                import ipdb
-                ipdb.set_trace()
                 sampled_smi = None
             if sampled_smi is None:
                 continue

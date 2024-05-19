@@ -13,7 +13,12 @@ from geoopt import Sphere as GSphere
 from einops import rearrange
 
 
-from src.sfm import fast_dot, safe_arccos, usinc
+from src.sfm import (
+    PowerSpherical,
+    fast_dot,
+    safe_arccos,
+    usinc,
+)
 
 
 def str_to_ot_method(method: str, reg: float = 0.05, reg_m: float = 1.0, loss: bool = False):
@@ -31,6 +36,30 @@ def str_to_ot_method(method: str, reg: float = 0.05, reg_m: float = 1.0, loss: b
         assert not loss, "no loss method available"
         return partial(ot.partial.entropic_partial_wasserstein, reg=reg)
     raise ValueError(f"Unknown method: {method}")
+
+
+def default_perturbation_schedule(t: Tensor) -> Tensor:
+    """Default quadratic perturbation schedule."""
+    return t * (1.0 - t)
+
+
+def metropolis_sphere_perturbation(
+    x: Tensor,
+    scale: Tensor,
+) -> Tensor:
+    """
+    Metropolis-Hastings for a perturbation on the positive orthant of the sphere.
+    """
+    # mask = torch.zeros((*x.shape[:-1], 1), device=x.device, dtype=torch.bool)
+    # Metroplis-Hastings
+    # while not mask.all():
+    #     import ipdb; ipdb.set_trace()
+    #     select = ~mask.expand_as(x)
+    #     x[select] = PowerSpherical(x, scale).sample()[select]
+    #     mask = (x >= 0.0).all(dim=-1, keepdim=True)
+    while len(scale.shape) < len(x.shape) - 1:
+        scale = scale.unsqueeze(-1)
+    return PowerSpherical(x, scale.expand(x.shape[:-1])).sample().abs()
 
 
 class Manifold(ABC):
@@ -97,8 +126,6 @@ class Manifold(ABC):
         t = t.unsqueeze(-1)
         x_t = self.exp_map(x_0, t * self.log_map(x_0, x_1))
         return self.project(x_t)
-        # p x_1[x_1.sum(dim=-1) < 0.25, :]
-        # (x_1.sum(dim=-1) == 1.0).shape
 
     @torch.inference_mode()
     def tangent_euler(
@@ -107,6 +134,7 @@ class Manifold(ABC):
         model: nn.Module,
         steps: int,
         tangent: bool = True,
+        stochastic: bool = False,
     ) -> Tensor:
         """
         Applies Euler integration on the manifold for the field defined
@@ -123,6 +151,8 @@ class Manifold(ABC):
         x = x_0
         t = torch.zeros((x.size(0), 1), device=x_0.device, dtype=x_0.dtype)
         for _ in range(steps):
+            if stochastic:
+                x = metropolis_sphere_perturbation(x, default_perturbation_schedule(t))
             if tangent:
                 x = self.exp_map(x, model(x=x, t=t) * dt)
             else:

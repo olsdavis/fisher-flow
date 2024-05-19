@@ -27,7 +27,8 @@ model:
   optimizer:
     lr: 0.001
   compile: false
-  inference_steps: 20
+  inference_steps: 100
+  stochastic: false
 
 data:
   batch_size: 64
