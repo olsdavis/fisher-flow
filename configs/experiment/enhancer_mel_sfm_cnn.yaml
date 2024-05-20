@@ -33,12 +33,12 @@ model:
     dropout: 0.0
   compile: false
   manifold: sphere
-  ot_method: exact
+  ot_method: None
   fbd_every: 10
   eval_fbd: true
   mel_or_dna: true  # MEL
   fbd_classifier_path: "workdir/clsMELclean_cnn_dropout02_2023-12-31_12-26-28/epoch=9-step=5540.ckpt"
-  inference_steps: 25
+  inference_steps: 500
 
 data:
   batch_size: 512

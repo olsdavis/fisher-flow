@@ -577,13 +577,13 @@ class BestEnhancerMLP(nn.Module):
         self.k = k
         self.dim = dim
 
-    def forward(self, x: Tensor, signal: Tensor, t: Tensor) -> Tensor:
+    def forward(self, x: Tensor, cls: Tensor, t: Tensor) -> Tensor:
         """Forward pass."""
         temb = self.temb(t)
         original = x.shape
         x = x.view(x.size(0), -1)
-        signal = signal.view(signal.size(0), -1)
-        x = torch.cat([x, signal, temb], dim=-1)
+        cls = cls.view(cls.size(0), -1)
+        x = torch.cat([x, cls, temb], dim=-1)
         ret = self.mlp(x)
         return ret.view(original[0], self.k, -1)
 

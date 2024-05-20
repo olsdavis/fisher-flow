@@ -38,7 +38,7 @@ model:
   eval_fbd: true
   mel_or_dna: false  # DNA
   fbd_classifier_path: "workdir/clsDNAclean_cnn_1stack_2023-12-30_15-01-30/epoch=15-step=10480.ckpt"
-  inference_steps: 25
+  inference_steps: 100
 
 data:
   batch_size: 512
@@ -47,7 +47,7 @@ data:
 logger:
   wandb:
     tags: ${tags}
-    name: enhancer_mel_s${seed}
+    name: enhancer_fly_s${seed}
     group: "enhancer"
     project: enhancer
   aim:
