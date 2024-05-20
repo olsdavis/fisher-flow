@@ -19,23 +19,27 @@ seed: 12345
 
 trainer:
   min_epochs: 1
-  max_epochs: 1000
+  max_epochs: 200
   gradient_clip_val: 1.0
   num_sanity_val_steps: 0
 
 model:
   optimizer:
-    lr: 0.001
+    lr: 0.0001
   compile: false
+  inference_steps: 100
+  stochastic: false
+  closed_form_drv: false
+  ot_method: None
 
 data:
   batch_size: 64
 
 logger:
   wandb:
-    project: sfm
+    project: sfm-retrosynth
     tags: ${tags}
     group: retrosyn
-    name: retrobridge_retro_syn_s12347
+    name: retrobridge_sfm_s${seed}
   aim:
     experiment: test_exp

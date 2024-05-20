@@ -4,6 +4,7 @@ from .maths import (
     safe_arccos,
     usinc,
 )
+from .powerspherical import PowerSpherical
 from .manifold import (
     GeooptSphere,
     Manifold,
@@ -11,6 +12,8 @@ from .manifold import (
     NSphere,
     manifold_from_name,
     str_to_ot_method,
+    default_perturbation_schedule,
+    metropolis_sphere_perturbation,
 )
 from .distribution import (
     estimate_categorical_kl,

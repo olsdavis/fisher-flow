@@ -2,11 +2,7 @@
 import torch
 from torch import Tensor, nn, vmap
 from torch.func import jvp
-from src.sfm import Manifold, OTSampler
-
-
-def print_stats(x: Tensor, name: str):
-    print(f"{name}: {x.mean().item():.8f} ± {x.std().item():.8f}; min: {x.min().item():.8f}; max: {x.max().item():.8f}")
+from src.sfm import Manifold, OTSampler, metropolis_sphere_perturbation, default_perturbation_schedule
 
 
 def geodesic(manifold, start_point, end_point):
@@ -47,7 +43,8 @@ def ot_train_step(
         - `time_eps`: "guard" for sampling the time;
         - `signal` (optional): extra signal for some datasets;
         - `closed_form_drv`: whether to use the closed-form derivative;
-            if `False`, uses autograd.
+            if `False`, uses autograd;
+        - `stochastic`: whether to train for an SDE.
     """
     b = x_1.size(0)
     k = x_1.size(1)
@@ -68,6 +65,7 @@ def cft_loss_function(
     sampler: OTSampler | None,
     extra_args: dict[str, Tensor] | None = None,
     closed_form_drv: bool = False,
+    stochastic: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor]:
     """
     Our CFT loss function. If `sampler` is provided, OT-CFT loss is calculated.
@@ -81,7 +79,8 @@ def cft_loss_function(
         - `sampler` (optional): the sampler for the OT plan;
         - `signal` (optional): extra signal for some datasets;
         - `closed_form_drv`: whether to use the closed-form derivative;
-            if `False`, uses autograd.
+            if `False`, uses autograd;
+        - `stochastic`: whether to train for an SDE.
 
     Returns:
         The loss tensor, the model output, and the target vector.
@@ -104,6 +103,10 @@ def cft_loss_function(
         x_t = x_t.squeeze()
         target = target.squeeze()
         assert m.all_belong_tangent(x_t, target)
+
+    if stochastic:
+        # corrupt the point
+        x_t = metropolis_sphere_perturbation(x_t, default_perturbation_schedule(t))
 
     # now calculate diffs
     out = model(x=x_t, t=t, **(extra_args or {}))
