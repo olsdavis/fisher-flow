@@ -382,6 +382,7 @@ def compute_retrosynthesis_metrics(grouped_samples, ground_truth, atom_decoder, 
 
     for i, sampled_reactants in enumerate(grouped_samples):
         true_reactants = ground_truth[i]
+        print("True: ")
         true_mol = build_molecule(true_reactants[0], true_reactants[1], atom_decoder)
         true_smi = Chem.MolToSmiles(true_mol)
         if true_smi is None:
@@ -389,6 +390,7 @@ def compute_retrosynthesis_metrics(grouped_samples, ground_truth, atom_decoder, 
 
         sampled_smis = []
         for sample in sampled_reactants:
+            print("Sampled: ")
             sampled_mol = build_molecule(sample[0], sample[1], atom_decoder)
             try:
                 sampled_smi = Chem.MolToSmiles(sampled_mol)
@@ -396,6 +398,7 @@ def compute_retrosynthesis_metrics(grouped_samples, ground_truth, atom_decoder, 
                 print("Error encountered when trying to produce")
                 print(e)
                 sampled_smi = None
+            print("Sampled: ", sampled_smi, " --- True: ", true_smi)
             if sampled_smi is None:
                 continue
             sampled_smis.append(sampled_smi)

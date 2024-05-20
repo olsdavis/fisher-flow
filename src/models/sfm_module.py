@@ -103,7 +103,7 @@ class SFMModule(LightningModule):
         chains_to_save: int = 5,
         fix_product_nodes: bool = True,
         samples_to_generate: int = 128,
-        samples_per_input: int = 5,
+        samples_per_input: int = 1,
         retrobridge_eval_every: int = 5,
     ):
         """
@@ -238,8 +238,8 @@ class SFMModule(LightningModule):
         edges_t = edges_t.reshape_as(product.E)
         edges_target = edges_target.reshape_as(product.E)
         # symmetrise edges_t, edges_target
-        # edges_t = self.symmetrise_edges(edges_t)
-        # edges_target = self.symmetrise_edges(edges_target)
+        edges_t = self.symmetrise_edges(edges_t)
+        edges_target = self.symmetrise_edges(edges_target)
         feats_t, feats_target = self.compute_target(
             product.X,
             reactants.X,
@@ -252,6 +252,18 @@ class SFMModule(LightningModule):
             feats_target,
             edges_target,
         )
+
+
+        # checks
+        # assert (torch.isclose(feats_t.square().sum(dim=-1), torch.tensor(1.0)) | torch.isclose(feats_t.square().sum(dim=-1), torch.tensor(0.0))).all()
+        # assert (torch.isclose(edges_t.square().sum(dim=-1), torch.tensor(1.0)) | torch.isclose(edges_t.square().sum(dim=-1), torch.tensor(0.0))).all()
+        # f_mask = torch.isclose(feats_t.square().sum(dim=-1), torch.tensor(1.0))
+        # assert self.manifold.all_belong_tangent(feats_t[f_mask], feats_target[f_mask])
+        # flat_e = edges_t.reshape(edges_t.size(0), -1, edges_t.size(-1))
+        # e_mask = torch.isclose(flat_e.square().sum(dim=(-1)), torch.tensor(1.0))
+        # assert self.manifold.all_belong_tangent(flat_e[e_mask], edges_target.reshape_as(flat_e)[e_mask])
+
+
         # define data
         noisy_data = {
             "t": t,
@@ -268,19 +280,24 @@ class SFMModule(LightningModule):
 
         pred = self.retrobridge_forward(noisy_data, extra_data, r_node_mask)
         # have two targets, need two projections
-        loss_x_raw = (self.manifold.masked_tangent_projection(feats_t, pred.X) - feats_target)
+        modifiable_nodes = (product.X[..., -1] == 1).unsqueeze(-1)
+        fixed_nodes = (product.X[..., -1] == 0).unsqueeze(-1)
+        assert torch.all(modifiable_nodes | fixed_nodes)
+        loss_x_raw = (
+            self.manifold.masked_tangent_projection(feats_t, pred.X) - feats_target
+        ) * modifiable_nodes
         # reshape for B, K, D shape
         edges_t = edges_t.reshape(edges_t.size(0), -1, edges_t.size(-1))
         pred_reshaped = pred.E.reshape(pred.E.size(0), -1, pred.E.size(-1))
         loss_edges_raw = (
             self.manifold.masked_tangent_projection(edges_t, pred_reshaped) - edges_target.reshape_as(edges_t)
         )
-        loss_edges_raw = loss_edges_raw.reshape_as(product.E)
+        # loss_edges_raw = loss_edges_raw.reshape_as(product.E)
 
-        final_X, final_E = self.mask_like_placeholder(p_node_mask, loss_x_raw, loss_edges_raw)
+        # final_X, final_E = self.mask_like_placeholder(p_node_mask, loss_x_raw, loss_edges_raw)
         loss = (
-            final_X.square().sum(dim=(-1, -2))
-            + final_E.square().sum(dim=(-1, -2, -3))
+            loss_x_raw.square().sum(dim=(-1, -2))
+            + 5.0 * loss_edges_raw.square().sum(dim=(-1, -2, -3))  # 5.0* done in retrobridge
         ).mean()
         return loss
 
@@ -356,7 +373,7 @@ class SFMModule(LightningModule):
         self,
         x_0: torch.Tensor,
         x_1: torch.Tensor,
-        t: torch.Tensor,
+        time: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Computes flow-matching target; returns point and target itself.
@@ -376,9 +393,13 @@ class SFMModule(LightningModule):
                         path = geodesic(self.manifold.sphere, x0, x1)
                         x_t, u_t = jvp(path, (t,), (torch.ones_like(t).to(t),))
                         return x_t, u_t
-                    x_t, target = vmap(cond_u)(x_0, x_1, t)
+                    x_t, target = vmap(cond_u)(x_0, x_1, time)
             x_t = x_t.squeeze()
             target = target.squeeze()
+            if x_0.size(0) == 1:
+                # squeezing will remove the batch
+                x_t = x_t.unsqueeze(0)
+                target = target.unsqueeze(0)
         else:
             mask = torch.isclose(x_0.square().sum(dim=-1), torch.tensor(1.0))
             x_t = torch.zeros_like(x_0)
@@ -389,10 +410,6 @@ class SFMModule(LightningModule):
             target = torch.zeros_like(x_t)
             target[mask] = self.manifold.log_map(x_0, x_1)[mask]
             target[mask] = self.manifold.parallel_transport(x_0, x_t, target)[mask]
-        if x_0.size(0) == 1:
-            # squeezing will remove the batch
-            x_t = x_t.unsqueeze(0)
-            target = target.unsqueeze(0)
         # assert self.manifold.all_belong_tangent(x_t, target)
         return x_t, target
     
@@ -495,6 +512,10 @@ class SFMModule(LightningModule):
         t = torch.zeros(data.batch_size, 1, device=data.x.device)
         context = product.clone() if self.use_context else None
         orig_edge_shape = E.shape
+        # Masks for fixed and modifiable nodes  | from Retrobridge
+        fixed_nodes = (product.X[..., -1] == 0).unsqueeze(-1)
+        modifiable_nodes = (product.X[..., -1] == 1).unsqueeze(-1)
+        assert torch.all(fixed_nodes | modifiable_nodes)
         # start!
         for i in range(self.inference_steps):
             if self.stochastic and not (i == 0 or i == self.inference_steps - 1):
@@ -512,10 +533,12 @@ class SFMModule(LightningModule):
             # prep
             target_edge_shape = (E.size(0), -1, E.size(-1))
             # make a step
+            # print(t[0], pred.X.square().sum(dim=(-1, -2)).mean(), pred.E.square().sum(dim=(-1, -2, -3)).mean())
             X = self.manifold.exp_map(
                 X, self.manifold.make_tangent(X, pred.X) * dt,
             )
             X = self.manifold.project(X)
+            X = X * modifiable_nodes + product.X * fixed_nodes
             E = E.reshape(target_edge_shape)
             E = self.manifold.exp_map(
                 E,
@@ -529,13 +552,16 @@ class SFMModule(LightningModule):
             t += dt
             E = E.reshape(orig_edge_shape)
             X, E = self.mask_like_placeholder(node_mask, X, E)
+            E = self.symmetrise_edges(E)
 
-        # E = self.symmetrise_edges(E)
-        return PlaceHolder(
+        ret = PlaceHolder(
             X=X,
             E=E,
             y=y,
         ).mask(node_mask, collapse=True)
+
+        # E = self.symmetrise_edges(E)
+        return ret
 
     def training_step(
         self, x_1: torch.Tensor | list[torch.Tensor] | Batch, batch_idx: int,
