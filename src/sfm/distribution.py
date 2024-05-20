@@ -214,7 +214,7 @@ def compute_exact_loglikelihood(
                         product_man,
                         odefunc,
                         state1,
-                        t=torch.linspace(t1, 0, num_steps + 1).to(batch),
+                        t=torch.linspace(0, t1, num_steps + 1).to(batch),
                         method="euler",
                         projx=eval_projx,
                         local_coords=local_coords,

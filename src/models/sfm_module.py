@@ -132,7 +132,7 @@ class SFMModule(LightningModule):
 
         # this line allows to access init params with 'self.hparams' attribute
         # also ensures init params will be stored in ckpt
-        self.save_hyperparameters(ignore=['net'], logger=False)
+        self.save_hyperparameters(ignore=["net", "fbd"], logger=False)
         # if basically zero or zero
         self.smoothing = label_smoothing if label_smoothing and label_smoothing > 1e-6 else None
         self.tangent_euler = tangent_euler
@@ -151,6 +151,7 @@ class SFMModule(LightningModule):
         self.val_loss = MeanMetric()
         self.test_loss = MeanMetric()
         self.val_ppl = MeanMetric()
+        self.test_ppl = MeanMetric()
         self.sp_mse = MeanMetric()
         self.test_sp_mse = MeanMetric()
         self.min_grad = MinMetric()
@@ -696,13 +697,17 @@ class SFMModule(LightningModule):
             self.sp_mse(mse)
             self.log("val/sp-mse", self.sp_mse, on_step=False, on_epoch=True, prog_bar=True)
         if self.eval_ppl and (self.trainer.current_epoch + 1) % self.eval_ppl_every == 0:
+            net = self.net if signal is None else (
+                partial(self.net, signal=signal) if len(signal.shape) != 1 else
+                partial(self.net, cls=signal)
+            )
             ppl = compute_exact_loglikelihood(
-                self.net, x_1, self.manifold.sphere, normalize_loglikelihood=self.normalize_loglikelihood,
+                net, x_1, self.manifold.sphere, normalize_loglikelihood=self.normalize_loglikelihood,
                 num_steps=self.inference_steps,
             ).mean()
             self.val_ppl(ppl)
             self.log("val/ppl", self.val_ppl, on_step=False, on_epoch=True, prog_bar=True)
-        if self.eval_fbd and (self.current_epoch + 1) % self.fbd_every == 0:
+        if self.eval_fbd and (self.current_epoch + 1) % self.fbd_every != 0:
             self.val_fbd(self.compute_fbd(x_1, signal, batch_idx))
             self.log("val/fbd", self.val_fbd, on_step=False, on_epoch=True, prog_bar=True)
 
@@ -762,6 +767,18 @@ class SFMModule(LightningModule):
         if self.eval_fbd:
             self.test_fbd(self.compute_fbd(x_1, signal, None))
             self.log("test/fbd", self.test_fbd, on_step=False, on_epoch=True, prog_bar=True)
+        if self.eval_ppl:
+            net = self.net if signal is None else (
+                partial(self.net, signal=signal) if len(signal.shape) != 1 else
+                partial(self.net, cls=signal)
+            )
+            ppl = compute_exact_loglikelihood(
+                net, x_1, self.manifold.sphere, normalize_loglikelihood=self.normalize_loglikelihood,
+                num_steps=self.inference_steps,
+            ).mean()
+            print(ppl)
+            self.test_ppl(ppl)
+            self.log("test/ppl", self.test_ppl, on_step=False, on_epoch=True, prog_bar=True)
 
     def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
         if self.debug_grads:
