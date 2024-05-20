@@ -21,9 +21,12 @@ from src.sfm import (
     eval_gpt_nll,
     manifold_from_name,
     ot_train_step,
+    metropolis_sphere_perturbation,
+    default_perturbation_schedule,
 )
 from src.models.net import TangentWrapper
 from src.data.components.promoter_eval import SeiEval
+from src.data.components.fbd import FBD
 from src.data import RetroBridgeDatasetInfos, PlaceHolder, retrobridge_utils
 from src.experiments.retrosynthesis import (
     DummyExtraFeatures,
@@ -52,6 +55,21 @@ def geodesic(manifold, start_point, end_point):
     return path
 
 
+def perturbed_geodesic(manifold, start_point, end_point):
+    shooting_tangent_vec = manifold.logmap(start_point, end_point)
+    def path_perturbed(t):
+        """Generate parameterized function for geodesic curve.
+        Parameters
+        ----------
+        t : array-like, shape=[n_points,]
+            Times at which to compute points of the geodesics.
+        """
+        tangent_vecs = torch.einsum("i,...k->...ik", t, shooting_tangent_vec)
+        points_at_time_t = manifold.expmap(start_point.unsqueeze(-2), tangent_vecs)
+        return metropolis_sphere_perturbation(points_at_time_t, default_perturbation_schedule(t))
+    return path_perturbed
+
+
 class SFMModule(LightningModule):
     """
     Module for the Toy DFM dataset.
@@ -72,9 +90,15 @@ class SFMModule(LightningModule):
         ema: bool = False,
         ema_decay: float = 0.99,
         tangent_euler: bool = True,
+        closed_form_drv: bool = False,
         debug_grads: bool = False,
         inference_steps: int = 100,
         datamodule: Any = None,  # in retrobridge
+        # enhancer
+        eval_fbd: bool = False,
+        fbd_every: int = 10,
+        mel_or_dna: bool = True,  # if True, then MEL; if not Fly Brain DNA
+        fbd_classifier_path: str | None = None,
         # retobridge parameters:
         input_dims: dict = {'X': 40, 'E': 10, 'y': 12},
         output_dims: dict = {'X': 17, 'E': 5, 'y': 0},
@@ -85,7 +109,6 @@ class SFMModule(LightningModule):
         number_chain_steps_to_save: int = 50,
         chains_to_save: int = 5,
         fix_product_nodes: bool = True,
-        lambda_train: list[int] = [5, 0],
         samples_to_generate: int = 128,
         samples_per_input: int = 5,
         retrobridge_eval_every: int = 10,
@@ -113,6 +136,7 @@ class SFMModule(LightningModule):
         # if basically zero or zero
         self.smoothing = label_smoothing if label_smoothing and label_smoothing > 1e-6 else None
         self.tangent_euler = tangent_euler
+        self.closed_form_drv = closed_form_drv
         self.promoter_eval = promoter_eval
         self.manifold = manifold_from_name(manifold)
         # don't wrap for retrobridge!
@@ -149,6 +173,21 @@ class SFMModule(LightningModule):
         self.retrobridge = datamodule is not None
         self.retrobridge_eval_every = retrobridge_eval_every
 
+        # enhancer
+        self.eval_fbd = eval_fbd
+        self.fbd_every = fbd_every
+        if eval_fbd:
+            self.fbd = FBD(
+                dim=4,
+                k=500,
+                num_cls=47 if mel_or_dna else 81,
+                hidden=128,  # read config
+                depth=4 if mel_or_dna else 1,
+                ckpt_path=fbd_classifier_path,
+            )
+            self.val_fbd = MeanMetric()
+            self.test_fbd = MeanMetric()
+
         # retrobridge variables
         if datamodule is not None:
             self.input_dims = input_dims
@@ -160,7 +199,6 @@ class SFMModule(LightningModule):
             self.number_chain_steps_to_save = number_chain_steps_to_save
             self.chains_to_save = chains_to_save
             self.fix_product_nodes = fix_product_nodes
-            self.lambda_train = lambda_train
             self.samples_to_generate = samples_to_generate
             self.samples_per_input = samples_per_input
             self.dataset_infos = RetroBridgeDatasetInfos(datamodule)
@@ -200,6 +238,8 @@ class SFMModule(LightningModule):
         self.val_loss.reset()
         self.val_ppl.reset()
         self.sp_mse.reset()
+        if hasattr(self, "val_fbd"):
+            self.val_fbd.reset()
 
     def on_validation_epoch_start(self):
         for optim in self.trainer.optimizers:
@@ -220,7 +260,7 @@ class SFMModule(LightningModule):
                 optim.eval()
 
     def model_step(
-        self, x_1: torch.Tensor, signal: torch.Tensor | None = None,
+        self, x_1: torch.Tensor, extra_args: dict[str, torch.Tensor] | None = None,
     ) -> torch.Tensor:
         """
         Perform a single model step on a batch of data.
@@ -232,8 +272,8 @@ class SFMModule(LightningModule):
             self.manifold,
             self.net,
             self.sampler,
-            signal=signal,
-            closed_form_drv=False,
+            closed_form_drv=self.closed_form_drv,
+            extra_args=extra_args,
         )[0]
 
     def retrobridge_step(
@@ -251,7 +291,6 @@ class SFMModule(LightningModule):
         product, p_node_mask = retrobridge_utils.to_dense(
             data.p_x, data.p_edge_index, data.p_edge_attr, data.batch,
         )
-        #retrobridge_utils.to_dense(data.p_x, data.p_edge_index, data.p_edge_attr, data.batch)[0].E.sum(dim=-1)
         product = product.mask(p_node_mask)
 
         t = torch.rand(data.batch_size, 1, device=data.x.device)
@@ -259,26 +298,46 @@ class SFMModule(LightningModule):
         # product is prior, reactants is targret
         # now, need to train over product of these buggers
 
-        # encode no edges as 1 in last dimension
-        start_e = self.encode_empty_cat(product.E)
-        end_e = self.encode_empty_cat(reactants.E)
+        target_edge_shape = (product.E.size(0), -1, product.E.size(-1))
         edges_t, edges_target = self.compute_target(
-            start_e,
-            end_e,
+            product.E.reshape(target_edge_shape),
+            reactants.E.reshape(target_edge_shape),
             t,
         )
-        # same for features
-        start_f = self.encode_empty_cat(product.X)
-        end_f = self.encode_empty_cat(reactants.X)
+        edges_t = edges_t.reshape_as(product.E)
+        edges_target = edges_target.reshape_as(product.E)
+        # symmetrise edges_t, edges_target
+        edges_t = self.symmetrise_edges(edges_t)
+        edges_target = self.symmetrise_edges(edges_target)
         feats_t, feats_target = self.compute_target(
-            start_f,
-            end_f,
+            product.X,
+            reactants.X,
             t,
         )
+        # mask things not included
+        feats_t, edges_t = self.mask_like_placeholder(p_node_mask, feats_t, edges_t)
+        feats_target, edges_target = self.mask_like_placeholder(
+            p_node_mask,
+            feats_target,
+            edges_target,
+        )
+
+
+        # checks
+        # assert (torch.isclose(feats_t.square().sum(dim=-1), torch.tensor(1.0)) | torch.isclose(feats_t.square().sum(dim=-1), torch.tensor(0.0))).all()
+        # assert (torch.isclose(edges_t.square().sum(dim=-1), torch.tensor(1.0)) | torch.isclose(edges_t.square().sum(dim=-1), torch.tensor(0.0))).all()
+        # f_mask = torch.isclose(feats_t.square().sum(dim=-1), torch.tensor(1.0))
+        # assert self.manifold.all_belong_tangent(feats_t[f_mask], feats_target[f_mask])
+        # flat_e = edges_t.reshape(edges_t.size(0), -1, edges_t.size(-1))
+        # e_mask = torch.isclose(flat_e.square().sum(dim=(-1)), torch.tensor(1.0))
+        # assert self.manifold.all_belong_tangent(flat_e[e_mask], edges_target.reshape_as(flat_e)[e_mask])
+
+
+        # define data
         noisy_data = {
             "t": t,
-            "E_t": edges_t[:, :, :, :-1],  # remove last item
-            "X_t": feats_t[:, :, :-1],  # remove last item
+            "E_t": edges_t,
+            "X_t": feats_t,
             "y": product.y,
             "y_t": product.y,
             "node_mask": r_node_mask,
@@ -290,14 +349,25 @@ class SFMModule(LightningModule):
 
         pred = self.retrobridge_forward(noisy_data, extra_data, r_node_mask)
         # have two targets, need two projections
-        loss_x = (self.manifold.make_tangent(feats_t, pred.X, missing_coordinate=True) - feats_target).square().sum(dim=(-1, -2))
+        modifiable_nodes = (product.X[..., -1] == 1).unsqueeze(-1)
+        fixed_nodes = (product.X[..., -1] == 0).unsqueeze(-1)
+        assert torch.all(modifiable_nodes | fixed_nodes)
+        loss_x_raw = (
+            self.manifold.masked_tangent_projection(feats_t, pred.X) - feats_target
+        ) * modifiable_nodes
         # reshape for B, K, D shape
         edges_t = edges_t.reshape(edges_t.size(0), -1, edges_t.size(-1))
         pred_reshaped = pred.E.reshape(pred.E.size(0), -1, pred.E.size(-1))
-        loss_edges = (
-            self.manifold.make_tangent(edges_t, pred_reshaped, missing_coordinate=True) - edges_target.reshape_as(edges_t)
-        ).square().sum(dim=(-1, -2))
-        loss = (loss_x + loss_edges).mean()
+        loss_edges_raw = (
+            self.manifold.masked_tangent_projection(edges_t, pred_reshaped) - edges_target.reshape_as(edges_t)
+        )
+        # loss_edges_raw = loss_edges_raw.reshape_as(product.E)
+
+        # final_X, final_E = self.mask_like_placeholder(p_node_mask, loss_x_raw, loss_edges_raw)
+        loss = (
+            loss_x_raw.square().sum(dim=(-1, -2))
+            + 5.0 * loss_edges_raw.square().sum(dim=(-1, -2, -3))  # 5.0* done in retrobridge
+        ).mean()
         return loss
 
     def retrobridge_forward(self, noisy_data: dict[str, Any], extra_data: PlaceHolder, node_mask: torch.Tensor) -> torch.Tensor:
@@ -313,6 +383,14 @@ class SFMModule(LightningModule):
         no_cat_pad = torch.zeros(*tensor.shape[:-1], 1).to(tensor)
         no_cat_pad[tensor.sum(dim=-1) == 0] = 1
         return torch.cat([no_cat_pad, tensor], dim=-1)
+
+    def symmetrise_edges(self, E: torch.Tensor) -> torch.Tensor:
+        """
+        Symmetrises the edges tensor.
+        """
+        i, j = torch.triu_indices(E.size(1), E.size(2))
+        E[:, i, j, :] = E[:, j, i, :]
+        return E
 
     def compute_extra_data(self, noisy_data, context=None, condition_on_t=True):
         """ At every training step (after adding noise) and step in sampling, compute extra information and append to
@@ -334,40 +412,80 @@ class SFMModule(LightningModule):
             extra_y = torch.cat((extra_y, t), dim=1)
         return PlaceHolder(X=extra_X, E=extra_E, y=extra_y)
 
+    def set_zero_diag(self, E: torch.Tensor) -> torch.Tensor:
+        """
+        Sets the diagonal of `E` to all zeros. Taken from `retrobridge_utils`.
+        """
+        diag = torch.eye(E.shape[1], dtype=torch.bool).unsqueeze(0).expand(E.shape[0], -1, -1)
+        E[diag] = 0
+        return E
+
+    def mask_like_placeholder(self, node_mask: torch.Tensor, X: torch.Tensor, E: torch.Tensor, collapse: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
+        x_mask = node_mask.unsqueeze(-1)
+        e_mask1 = x_mask.unsqueeze(2)
+        e_mask2 = x_mask.unsqueeze(1)
+
+        if collapse:
+            X = torch.argmax(X, dim=-1)
+            E = torch.argmax(E, dim=-1)
+
+            X[node_mask == 0] = - 1
+            E[(e_mask1 * e_mask2).squeeze(-1) == 0] = - 1
+        else:
+            X[node_mask == 0, :] = 0
+            E[~((e_mask1 * e_mask2).squeeze(-1)), :] = 0
+            E = self.set_zero_diag(E)
+            # assert torch.allclose(E, torch.transpose(E, 1, 2))
+        return X, E
+
     def compute_target(
         self,
         x_0: torch.Tensor,
         x_1: torch.Tensor,
-        t: torch.Tensor,
+        time: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Computes flow-matching target; returns point and target itself.
         """
-        with torch.inference_mode(False):
-            # https://github.com/facebookresearch/riemannian-fm/blob/main/manifm/model_pl.py
-            def cond_u(x0, x1, t):
-                path = geodesic(self.manifold.sphere, x0, x1)
-                x_t, u_t = jvp(path, (t,), (torch.ones_like(t).to(t),))
-                return x_t, u_t
-            x_t, target = vmap(cond_u)(x_0, x_1, t)
-        x_t = x_t.squeeze()
-        target = target.squeeze()
-        if x_0.size(0) == 1:
-            # squeezing will remove the batch
-            x_t = x_t.unsqueeze(0)
-            target = target.unsqueeze(0)
+        if not self.closed_form_drv:
+            with torch.inference_mode(False):
+                def cond_u(x0, x1, t):
+                    path = geodesic(self.manifold.sphere, x0, x1)
+                    x_t, u_t = jvp(path, (t,), (torch.ones_like(t).to(t),))
+                    return x_t, u_t
+                x_t, target = vmap(cond_u)(x_0, x_1, time)
+            x_t = x_t.squeeze()
+            target = target.squeeze()
+            if x_0.size(0) == 1:
+                # squeezing will remove the batch
+                x_t = x_t.unsqueeze(0)
+                target = target.unsqueeze(0)
+        else:
+            mask = torch.isclose(x_0.square().sum(dim=-1), torch.tensor(1.0))
+            x_t = torch.zeros_like(x_0)
+            x_t[mask] = self.manifold.geodesic_interpolant(x_0, x_1, t)[mask]
+            x_t[mask] = metropolis_sphere_perturbation(
+                x_t, default_perturbation_schedule(t)
+            )[mask]
+            target = torch.zeros_like(x_t)
+            target[mask] = self.manifold.log_map(x_0, x_1)[mask]
+            target[mask] = self.manifold.parallel_transport(x_0, x_t, target)[mask]
         # assert self.manifold.all_belong_tangent(x_t, target)
         return x_t, target
 
     def retrobridge_eval(self):
         """Evaluation metrics for retrobridge."""
         samples_left_to_generate = self.samples_to_generate
+        samples_left_to_save = 0 # self.samples_to_save
+        chains_left_to_save = self.chains_to_save
 
         samples = []
         grouped_samples = []
+        # grouped_scores = []
         ground_truth = []
 
         ident = 0
+        print(f'Sampling epoch={self.current_epoch}')
 
         dataloader = self.trainer.datamodule.val_dataloader()
         for data in tqdm(dataloader, total=samples_left_to_generate // dataloader.batch_size):
@@ -377,31 +495,47 @@ class SFMModule(LightningModule):
             data = data.to(self.device)
             bs = len(data.batch.unique())
             to_generate = bs
+            to_save = min(samples_left_to_save, bs)
+            chains_save = min(chains_left_to_save, bs)
             batch_groups = []
-            ground_truth.extend(
-                retrobridge_utils.create_true_reactant_molecules(data, batch_size=bs)
-            )
-            for _ in range(self.samples_per_input):
-                mol_batch = self.sample_molecule(
+            # batch_scores = []
+            for sample_idx in range(self.samples_per_input):
+                """molecule_list, true_molecule_list, products_list, scores, _, _ = self.sample_batch(
                     data=data,
-                )
-                molecule_list = retrobridge_utils.create_pred_reactant_molecules(
-                    mol_batch.X, mol_batch.E, data.batch, batch_size=bs,
-                )
+                    batch_id=ident,
+                    batch_size=to_generate,
+                    save_final=to_save,
+                    keep_chain=chains_save,
+                    number_chain_steps_to_save=self.number_chain_steps_to_save,
+                    sample_idx=sample_idx,
+                )"""
+                mol_sample = self.sample_molecule(data)
+                molecule_list = retrobridge_utils.create_pred_reactant_molecules(mol_sample.X, mol_sample.E, data.batch, to_generate)
                 samples.extend(molecule_list)
                 batch_groups.append(molecule_list)
+                # batch_scores.append(scores)
+                if sample_idx == 0:
+                    ground_truth.extend(
+                        retrobridge_utils.create_true_reactant_molecules(data, to_generate)
+                    )
 
             ident += to_generate
+            samples_left_to_save -= to_save
             samples_left_to_generate -= to_generate
+            chains_left_to_save -= chains_save
 
             # Regrouping sampled reactants for computing top-N accuracy
             for mol_idx_in_batch in range(bs):
                 mol_samples_group = []
+                mol_scores_group = []
+                # for batch_group, scores_group in zip(batch_groups, batch_scores):
                 for batch_group in batch_groups:
                     mol_samples_group.append(batch_group[mol_idx_in_batch])
+                    # mol_scores_group.append(scores_group[mol_idx_in_batch])
 
                 assert len(mol_samples_group) == self.samples_per_input
                 grouped_samples.append(mol_samples_group)
+                # grouped_scores.append(mol_scores_group)
 
         to_log = compute_retrosynthesis_metrics(
             grouped_samples=grouped_samples,
@@ -418,7 +552,7 @@ class SFMModule(LightningModule):
 
         self.val_molecular_metrics.reset()
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def sample_molecule(
         self,
         data: Batch,
@@ -439,57 +573,52 @@ class SFMModule(LightningModule):
         t = torch.zeros(data.batch_size, 1, device=data.x.device)
         context = product.clone() if self.use_context else None
         orig_edge_shape = E.shape
+        # Masks for fixed and modifiable nodes  | from Retrobridge
+        fixed_nodes = (product.X[..., -1] == 0).unsqueeze(-1)
+        modifiable_nodes = (product.X[..., -1] == 1).unsqueeze(-1)
+        assert torch.all(fixed_nodes | modifiable_nodes)
         # start!
         for _ in range(self.inference_steps):
             noisy_data = {
                 "t": t,
                 "E_t": E,
                 "X_t": X,
-                "y": y,
-                "y_t": product.y,
+                "y_t": y,
                 "node_mask": node_mask,
             }
             extra_data = self.compute_extra_data(noisy_data, context=context)
             pred = self.retrobridge_forward(noisy_data, extra_data, node_mask)
-            # put on simplex
-            E = self.encode_empty_cat(pred.E)
-            X = self.encode_empty_cat(pred.X)
             # prep
             target_edge_shape = (E.size(0), -1, E.size(-1))
             # make a step
             X = self.manifold.exp_map(
-                X, self.manifold.make_tangent(X, pred.X, missing_coordinate=True) * dt,
+                X, self.manifold.make_tangent(X, pred.X) * dt,
             )
-            X = self.manifold.project(X)[:, :, :-1]
+            X = self.manifold.project(X)
+            X = X * modifiable_nodes + product.X * fixed_nodes
             E = E.reshape(target_edge_shape)
             E = self.manifold.exp_map(
                 E,
-                self.manifold.make_tangent(
+                self.manifold.masked_tangent_projection(
                     E,
                     pred.E.reshape((pred.E.size(0), -1, pred.E.size(-1))),
-                    missing_coordinate=True,
                 ) * dt,
             )
-            E = self.manifold.project(E)
-            E = E.reshape(*orig_edge_shape[:-1], orig_edge_shape[-1] + 1)[:, :, :, :-1]
+            E = self.manifold.masked_projection(E)
             y = pred.y
             t += dt
-        # X and E, flattened, are on the sphere; so we can determine the
-        # last coordinate that we removed
-        # that is useful to determine whether the edge/node is present or
-        # not at all
-        def to_one_hot(tensor: torch.Tensor):
-            orig_shape = tensor.shape
-            tensor = tensor.reshape(orig_shape[0], -1, orig_shape[-1])
-            remaining = tensor.square().sum(dim=-1, keepdim=True)
-            combined = torch.cat([tensor, (1.0 - remaining).sqrt()], dim=-1)
-            argmax = combined.argmax(dim=-1)
-            ret = F.one_hot(argmax, num_classes=combined.shape[-1])
-            ret[argmax == combined.shape[-1] - 1, :] = 0
-            return ret[:, :, :-1].reshape(orig_shape)
-        return PlaceHolder(
-            X=to_one_hot(X), E=to_one_hot(E), y=y,
+            E = E.reshape(orig_edge_shape)
+            X, E = self.mask_like_placeholder(node_mask, X, E)
+            E = self.symmetrise_edges(E)
+
+        ret = PlaceHolder(
+            X=X,
+            E=E,
+            y=y,
         ).mask(node_mask, collapse=True)
+
+        # E = self.symmetrise_edges(E)
+        return ret
 
     def produce_text_samples(self, n: int) -> list[str]:
         """
@@ -519,8 +648,11 @@ class SFMModule(LightningModule):
         if isinstance(x_1, list):
             x_1, signal = x_1
             # Only one of the two signal inputs is used (the first one)
-            signal = signal[:, :, 0].unsqueeze(-1)
-            loss = self.model_step(x_1, signal)
+            if len(signal.shape) == 2:
+                signal = signal[:, :, 0].unsqueeze(-1)
+                loss = self.model_step(x_1, {"signal": signal})
+            else:
+                loss = self.model_step(x_1, {"cls": signal})
         elif isinstance(x_1, Batch):
             loss = self.retrobridge_step(x_1)
         else:
@@ -546,8 +678,11 @@ class SFMModule(LightningModule):
         if isinstance(x_1, list):
             x_1, signal = x_1
             # Only one of the two signal inputs is used (the first one)
-            signal = signal[:, :, 0].unsqueeze(-1)
-            loss = self.model_step(x_1, signal)
+            if len(signal.shape) == 2:
+                signal = signal[:, :, 0].unsqueeze(-1)
+                loss = self.model_step(x_1, {"signal": signal})
+            else:
+                loss = self.model_step(x_1, {"cls": signal})
         elif isinstance(x_1, Batch):
             loss = self.retrobridge_step(x_1)
         else:
@@ -567,6 +702,9 @@ class SFMModule(LightningModule):
             ).mean()
             self.val_ppl(ppl)
             self.log("val/ppl", self.val_ppl, on_step=False, on_epoch=True, prog_bar=True)
+        if self.eval_fbd and (self.current_epoch + 1) % self.fbd_every == 0:
+            self.val_fbd(self.compute_fbd(x_1, signal, batch_idx))
+            self.log("val/fbd", self.val_fbd, on_step=False, on_epoch=True, prog_bar=True)
 
     def on_validation_epoch_end(self) -> None:
         """Lightning hook that is called when a validation epoch ends."""
@@ -584,7 +722,7 @@ class SFMModule(LightningModule):
                 inference_steps=self.inference_steps,
             )
             self.log("val/kl", kl, on_step=False, on_epoch=True, prog_bar=True)
-        if self.dataset_infos is not None and (self.trainer.current_epoch + 1) % self.retrobridge_eval_every == 0:
+        if self.dataset_infos is not None and (self.retrobridge_eval_every == 1 or (self.trainer.current_epoch + 1) % self.retrobridge_eval_every == 0):
             # evaluate retrobridge
             self.retrobridge_eval()
         if self.eval_gpt_nll and (self.trainer.current_epoch + 1) % self.gpt_nll_every == 0:
@@ -604,8 +742,11 @@ class SFMModule(LightningModule):
         if isinstance(x_1, list):
             x_1, signal = x_1
             # Only one of the two signal inputs is used (the first one)
-            signal = signal[:, :, 0].unsqueeze(-1)
-            loss = self.model_step(x_1, signal)
+            if len(signal.shape) == 2:
+                signal = signal[:, :, 0].unsqueeze(-1)
+                loss = self.model_step(x_1, {"signal": signal})
+            else:
+                loss = self.model_step(x_1, {"cls": signal})
         elif isinstance(x_1, Batch):
             loss = self.retrobridge_step(x_1)
         else:
@@ -618,6 +759,9 @@ class SFMModule(LightningModule):
             mse = self.compute_sp_mse(x_1, signal)
             self.test_sp_mse(mse)
             self.log("test/sp-mse", self.test_sp_mse, on_step=False, on_epoch=True, prog_bar=True)
+        if self.eval_fbd:
+            self.test_fbd(self.compute_fbd(x_1, signal, None))
+            self.log("test/fbd", self.test_fbd, on_step=False, on_epoch=True, prog_bar=True)
 
     def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
         if self.debug_grads:
@@ -663,6 +807,24 @@ class SFMModule(LightningModule):
         mx = torch.argmax(pred, dim=-1)
         one_hot = F.one_hot(mx, num_classes=4)
         return SeiEval().eval_sp_mse(seq_one_hot=one_hot, target=x_1, b_index=batch_idx)
+
+    def compute_fbd(
+        self,
+        x_1: torch.Tensor,
+        signal: torch.Tensor,
+        batch_idx: int | None,
+    ):
+        """
+        Computes the FBD.
+        """
+        eval_model = partial(self.net, cls=signal)
+        pred = self.manifold.tangent_euler(
+            self.manifold.uniform_prior(*x_1.shape).to(self.device),
+            eval_model,
+            self.inference_steps,
+            tangent=self.tangent_euler,
+        )
+        return self.fbd(pred.argmax(dim=-1), x_1.argmax(dim=-1), batch_idx)
 
     def optimizer_step(self, *args, **kwargs):
         super().optimizer_step(*args, **kwargs)

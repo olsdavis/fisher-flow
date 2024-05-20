@@ -129,9 +129,11 @@ def build_molecule(atom_types, edge_types, atom_decoder, verbose=False, return_n
     mol = Chem.RWMol()
     dummy_atoms = set()
     mapping = {}
+    atom_freqs = {}
     j = 0
     for i, atom in enumerate(atom_types):
         a = Chem.Atom(atom_decoder[atom.item()])
+        atom_freqs[a.GetSymbol()] = atom_freqs.get(a.GetSymbol(), 0) + 1
         if a.GetSymbol() == '*':
             dummy_atoms.add(i)
             continue
@@ -141,7 +143,8 @@ def build_molecule(atom_types, edge_types, atom_decoder, verbose=False, return_n
         j += 1
         if verbose:
             print("Atom added: ", atom.item(), atom_decoder[atom.item()])
-
+    print(atom_freqs)
+    print(edge_types)
     edge_types = torch.triu(edge_types)
     all_bonds = torch.nonzero(edge_types)
     for i, bond in enumerate(all_bonds):
