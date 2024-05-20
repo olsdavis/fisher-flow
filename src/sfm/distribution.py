@@ -234,7 +234,7 @@ def compute_exact_loglikelihood(
             logp1 = logp0 + logdetjac.sum(dim=-1)
 
             if normalize_loglikelihood:
-                logp1 = logp1 / x0.size(-1)
+                logp1 = logp1 / np.prod(batch.shape[1:])
 
             # Mask out those that left the manifold
             masked_logp1 = logp1
