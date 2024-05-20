@@ -5,34 +5,39 @@
 
 defaults:
   - override /data: text8
-  - override /model: toy_cnn_sfm
+  - override /model: text8_sfm_gpt
   - override /callbacks: default
   - override /trainer: default
 
 # all parameters below will be merged with parameters from default configurations set above
 # this allows you to overwrite only specified parameters
 
-tags: ["text8", "cnn"]
+tags: ["text8", "gpt"]
 
 seed: 12345
 
 trainer:
   min_epochs: 1
-  max_epochs: 1000
+  max_epochs: 200
   gradient_clip_val: 1.0
 
 model:
   optimizer:
     lr: 0.001
   net:
-    k: ${data.k}
-    dim: ${data.dim}
-    manifold: sphere
-  compile: false
+    block_size: ${data.k}
+    vocab_size: ${data.dim}
+    n_layer: 8
+    n_head: 8
+    n_embd: 512
+  manifold: sphere
+  compile: true
   eval_ppl: true
   gpt_nll_eval: true
-  eval_gpt_nll_every: 1
+  eval_gpt_nll_every: 5
+  eval_ppl_every: 5
   gpt_nll_samples: 512
+  ot_method: None
 
 data:
   batch_size: 256
@@ -42,6 +47,8 @@ data:
 logger:
   wandb:
     tags: ${tags}
-    group: "toy_dfm"
+    group: "text8"
+    name: sfm_gpt
+    project: "sfm_gpt"
   aim:
-    experiment: "toy_dfm"
+    experiment: "text8"

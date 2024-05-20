@@ -16,7 +16,9 @@ from .manifold import (
     metropolis_sphere_perturbation,
 )
 from .distribution import (
+    compute_exact_loglikelihood,
     estimate_categorical_kl,
+    eval_gpt_nll,
     get_wasserstein_dist,
     set_seeds,
 )

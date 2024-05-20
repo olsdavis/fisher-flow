@@ -37,3 +37,4 @@ cooltools==0.7.0
 rdkit==2023.9.5
 torch_geometric==2.5.3
 torchdiffeq==0.2.3
+schedulefree==1.2.5

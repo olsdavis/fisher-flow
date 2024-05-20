@@ -10,3 +10,4 @@ logs/
 *.pt
 pytabix_fix/
 copy2server.sh
+cache/

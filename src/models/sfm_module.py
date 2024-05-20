@@ -11,11 +11,14 @@ from torchmetrics import MeanMetric, MinMetric, MaxMetric
 from torch_ema import ExponentialMovingAverage
 from torch_geometric.data import Batch
 from tqdm import tqdm
+import schedulefree
 
 
 from src.sfm import (
     OTSampler,
+    compute_exact_loglikelihood,
     estimate_categorical_kl,
+    eval_gpt_nll,
     manifold_from_name,
     ot_train_step,
     metropolis_sphere_perturbation,
@@ -107,8 +110,18 @@ class SFMModule(LightningModule):
         chains_to_save: int = 5,
         fix_product_nodes: bool = True,
         samples_to_generate: int = 128,
-        samples_per_input: int = 1,
-        retrobridge_eval_every: int = 5,
+        samples_per_input: int = 5,
+        retrobridge_eval_every: int = 10,
+        # ppl
+        eval_ppl: bool = False,
+        eval_ppl_every: int = 10,
+        normalize_loglikelihood: bool = False,
+        # GPT NLL?
+        gpt_nll_eval: bool = False,
+        eval_gpt_nll_every: int = 10,
+        gpt_nll_samples: int = 512,
+        # misc
+        fast_matmul: bool = False,
     ):
         """
         :param net: The model to train.
@@ -137,6 +150,7 @@ class SFMModule(LightningModule):
         self.train_loss = MeanMetric()
         self.val_loss = MeanMetric()
         self.test_loss = MeanMetric()
+        self.val_ppl = MeanMetric()
         self.sp_mse = MeanMetric()
         self.test_sp_mse = MeanMetric()
         self.min_grad = MinMetric()
@@ -146,6 +160,16 @@ class SFMModule(LightningModule):
         self.kl_samples = kl_samples
         self.debug_grads = debug_grads
         self.inference_steps = inference_steps
+        # PPL
+        self.eval_ppl = eval_ppl
+        self.eval_ppl_every = eval_ppl_every
+        self.normalize_loglikelihood = normalize_loglikelihood
+        # GPT NLL
+        self.eval_gpt_nll = gpt_nll_eval
+        self.gpt_nll_every = eval_gpt_nll_every
+        self.gpt_nll_samples = gpt_nll_samples
+
+        # retrobridge:
         self.retrobridge = datamodule is not None
         self.retrobridge_eval_every = retrobridge_eval_every
 
@@ -194,9 +218,14 @@ class SFMModule(LightningModule):
                 domain_features=self.domain_features,
                 use_context=use_context,
             )
-            self.val_molecular_metrics = SamplingMolecularMetrics(self.dataset_infos, datamodule.train_smiles,)
+            self.val_molecular_metrics = SamplingMolecularMetrics(
+                self.dataset_infos,
+                datamodule.train_smiles,
+            )
         else:
             self.dataset_infos = None
+        if fast_matmul:
+            torch.set_float32_matmul_precision("high")
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Perform a forward pass through the model `self.net`."""
@@ -207,9 +236,28 @@ class SFMModule(LightningModule):
         # by default lightning executes validation step sanity checks before training starts,
         # so it's worth to make sure validation metrics don't store results from these checks
         self.val_loss.reset()
+        self.val_ppl.reset()
         self.sp_mse.reset()
         if hasattr(self, "val_fbd"):
             self.val_fbd.reset()
+
+    def on_validation_epoch_start(self):
+        for optim in self.trainer.optimizers:
+            # schedule free needs to set to eval
+            if isinstance(optim, schedulefree.AdamWScheduleFree):
+                optim.eval()
+
+    def on_train_epoch_start(self):
+        for optim in self.trainer.optimizers:
+            # schedule free needs to set to train
+            if isinstance(optim, schedulefree.AdamWScheduleFree):
+                optim.train()
+
+    def on_test_epoch_start(self):
+        for optim in self.trainer.optimizers:
+            # schedule free needs to set to eval
+            if isinstance(optim, schedulefree.AdamWScheduleFree):
+                optim.eval()
 
     def model_step(
         self, x_1: torch.Tensor, extra_args: dict[str, torch.Tensor] | None = None,
@@ -424,8 +472,9 @@ class SFMModule(LightningModule):
             target[mask] = self.manifold.parallel_transport(x_0, x_t, target)[mask]
         # assert self.manifold.all_belong_tangent(x_t, target)
         return x_t, target
-    
+
     def retrobridge_eval(self):
+        """Evaluation metrics for retrobridge."""
         samples_left_to_generate = self.samples_to_generate
         samples_left_to_save = 0 # self.samples_to_save
         chains_left_to_save = self.chains_to_save
@@ -571,6 +620,21 @@ class SFMModule(LightningModule):
         # E = self.symmetrise_edges(E)
         return ret
 
+    def produce_text_samples(self, n: int) -> list[str]:
+        """
+        Produces `n` text samples.
+        """
+        samples = self.manifold.tangent_euler(
+            self.manifold.uniform_prior(n, 256, 28).to(self.device),
+            self.net,
+            self.inference_steps,
+        )
+        chars = samples.argmax(dim=-1).cpu()
+        rets = []
+        for sample in chars:
+            rets += ["".join([self.trainer.datamodule.itos[c.item()] for c in sample])]
+        return rets
+
     def training_step(
         self, x_1: torch.Tensor | list[torch.Tensor] | Batch, batch_idx: int,
     ) -> torch.Tensor:
@@ -631,6 +695,13 @@ class SFMModule(LightningModule):
             mse = self.compute_sp_mse(x_1, signal, batch_idx)
             self.sp_mse(mse)
             self.log("val/sp-mse", self.sp_mse, on_step=False, on_epoch=True, prog_bar=True)
+        if self.eval_ppl and (self.trainer.current_epoch + 1) % self.eval_ppl_every == 0:
+            ppl = compute_exact_loglikelihood(
+                self.net, x_1, self.manifold.sphere, normalize_loglikelihood=self.normalize_loglikelihood,
+                num_steps=self.inference_steps,
+            ).mean()
+            self.val_ppl(ppl)
+            self.log("val/ppl", self.val_ppl, on_step=False, on_epoch=True, prog_bar=True)
         if self.eval_fbd and (self.current_epoch + 1) % self.fbd_every == 0:
             self.val_fbd(self.compute_fbd(x_1, signal, batch_idx))
             self.log("val/fbd", self.val_fbd, on_step=False, on_epoch=True, prog_bar=True)
@@ -654,6 +725,12 @@ class SFMModule(LightningModule):
         if self.dataset_infos is not None and (self.retrobridge_eval_every == 1 or (self.trainer.current_epoch + 1) % self.retrobridge_eval_every == 0):
             # evaluate retrobridge
             self.retrobridge_eval()
+        if self.eval_gpt_nll and (self.trainer.current_epoch + 1) % self.gpt_nll_every == 0:
+            nll = eval_gpt_nll(
+                self.produce_text_samples(self.gpt_nll_samples),
+                self.device,
+            )
+            self.log("val/gpt-nll", nll, on_step=False, on_epoch=True, prog_bar=True)
 
     def test_step(self, x_1: torch.Tensor | list[torch.Tensor], batch_idx: int):
         """Perform a single test step on a batch of data from the test set.
