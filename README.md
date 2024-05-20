@@ -41,3 +41,32 @@ python -m src.train experiment=retrobridge_retrosyn logger=wandb
 ```py
 python -m src.train experiment=text8_sfm_bmlp logger=wandb
 ```
+
+## QM9
+
+Download trained models
+
+```sh
+wget -r -np -nH --cut-dirs=2 --reject 'index.html*' https://bits.csb.pitt.edu/files/FlowMol/trained_models/
+```
+
+Download the QM9 dataset
+
+```sh
+mkdir data/qm9_raw
+cd data/qm9_raw
+wget https://deepchemdata.s3-us-west-1.amazonaws.com/datasets/molnet_publish/qm9.zip
+wget -O uncharacterized.txt https://ndownloader.figshare.com/files/3195404
+unzip qm9.zip
+```
+
+Process the dataset:
+```py
+python process_qm9.py --config=trained_models/qm9_gaussian/config.yaml
+```
+
+To test the DataModule:
+
+```py
+python -m src.data.qm9_datamodule
+```
