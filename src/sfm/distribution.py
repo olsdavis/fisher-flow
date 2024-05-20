@@ -3,6 +3,7 @@ import random
 import torch
 from torch import Tensor, nn
 import numpy as np
+from scipy.linalg import sqrtm
 import tqdm
 from src.sfm import Manifold, NSimplex
 
@@ -81,3 +82,17 @@ def estimate_categorical_kl(
         print(acc)
     ret = (acc * (acc.log() - real_dist.log())).sum(dim=-1).mean().item()
     return ret
+
+
+def get_wasserstein_dist(embeds1, embeds2):
+    # Taken from: https://github.com/HannesStark/dirichlet-flow-matching/blob/main/utils/flow_utils.py#L38
+    if np.isnan(embeds2).any() or np.isnan(embeds1).any() or len(embeds1) == 0 or len(embeds2) == 0:
+        return float('nan')
+    mu1, sigma1 = embeds1.mean(axis=0), np.cov(embeds1, rowvar=False)
+    mu2, sigma2 = embeds2.mean(axis=0), np.cov(embeds2, rowvar=False)
+    ssdiff = np.sum((mu1 - mu2) ** 2.0)
+    covmean = sqrtm(sigma1.dot(sigma2))
+    if np.iscomplexobj(covmean):
+        covmean = covmean.real
+    dist = ssdiff + np.trace(sigma1 + sigma2 - 2.0 * covmean)
+    return dist

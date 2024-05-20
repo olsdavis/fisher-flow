@@ -1,7 +1,7 @@
 """Defines models used in this code base."""
+import copy
 import torch
 from torch import Tensor, nn
-import copy
 import torch.nn.functional as F
 import numpy as np
 from src.sfm import Manifold
@@ -577,13 +577,13 @@ class BestEnhancerMLP(nn.Module):
         self.k = k
         self.dim = dim
 
-    def forward(self, x: Tensor, signal: Tensor, t: Tensor) -> Tensor:
+    def forward(self, x: Tensor, cls: Tensor, t: Tensor) -> Tensor:
         """Forward pass."""
         temb = self.temb(t)
         original = x.shape
         x = x.view(x.size(0), -1)
-        signal = signal.view(signal.size(0), -1)
-        x = torch.cat([x, signal, temb], dim=-1)
+        cls = cls.view(cls.size(0), -1)
+        x = torch.cat([x, cls, temb], dim=-1)
         ret = self.mlp(x)
         return ret.view(original[0], self.k, -1)
 
@@ -791,9 +791,13 @@ class CNNModel(nn.Module):
             self.cls_embedder = nn.Embedding(num_embeddings=self.num_cls + 1, embedding_dim=self.hidden)
             self.cls_layers = nn.ModuleList([Dense(self.hidden, self.hidden) for _ in range(self.num_layers)])
 
-    def forward(self, x, t: Tensor, cls = None, return_embedding=False):
-        seq = x.view(-1, self.k, self.dim)
-        if len(t.shape) == 0:
+    def forward(self, x, t: Tensor | None, cls = None, return_embedding=False):
+        if t is not None:
+            seq = x.view(-1, self.k, self.dim)
+        else:
+            # classifier mode
+            seq = x
+        if t is not None and len(t.shape) == 0:
             # odeint is on
             t = t[None].expand(seq.size(0))
         if self.clean_data:
@@ -830,9 +834,6 @@ class CNNModel(nn.Module):
             else:
                 return self.cls_head(feat)
         return feat
-
-    def missing_coordinate(self) -> bool:
-        return False
 
 
 def expand_simplex(xt, alphas, prior_pseudocount):

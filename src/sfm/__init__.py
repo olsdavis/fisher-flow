@@ -17,6 +17,7 @@ from .manifold import (
 )
 from .distribution import (
     estimate_categorical_kl,
+    get_wasserstein_dist,
     set_seeds,
 )
 from .misc import (

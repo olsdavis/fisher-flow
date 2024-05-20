@@ -9,4 +9,4 @@
 #SBATCH --gres=gpu:4
 conda activate sfm
 # srun -u python main.py -e dfm_toy -c config/toy_dfm/bmlp.yml -m sphere --wandb
-python -m src.train experiment=promoter_sfm_promdfm trainer.max_epochs=200 trainer=ddp trainer.devices=4 logger=wandb data.batch_size=512
+python -m src.train experiment=promoter_sfm_promdfm seed=$1 trainer.max_epochs=200 trainer=ddp trainer.devices=4 logger=wandb data.batch_size=512

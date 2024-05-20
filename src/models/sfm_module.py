@@ -23,6 +23,7 @@ from src.sfm import (
 )
 from src.models.net import TangentWrapper
 from src.data.components.promoter_eval import SeiEval
+from src.data.components.fbd import FBD
 from src.data import RetroBridgeDatasetInfos, PlaceHolder, retrobridge_utils
 from src.experiments.retrosynthesis import (
     DummyExtraFeatures,
@@ -89,9 +90,12 @@ class SFMModule(LightningModule):
         closed_form_drv: bool = False,
         debug_grads: bool = False,
         inference_steps: int = 100,
-        # stochasticity!
-        stochastic: bool = False,
         datamodule: Any = None,  # in retrobridge
+        # enhancer
+        eval_fbd: bool = False,
+        fbd_every: int = 10,
+        mel_or_dna: bool = True,  # if True, then MEL; if not Fly Brain DNA
+        fbd_classifier_path: str | None = None,
         # retobridge parameters:
         input_dims: dict = {'X': 40, 'E': 10, 'y': 12},
         output_dims: dict = {'X': 17, 'E': 5, 'y': 0},
@@ -122,7 +126,6 @@ class SFMModule(LightningModule):
         self.closed_form_drv = closed_form_drv
         self.promoter_eval = promoter_eval
         self.manifold = manifold_from_name(manifold)
-        self.stochastic = stochastic
         # don't wrap for retrobridge!
         self.net = TangentWrapper(self.manifold, net).to(self.device) if not datamodule else net
         if ema:
@@ -145,6 +148,21 @@ class SFMModule(LightningModule):
         self.inference_steps = inference_steps
         self.retrobridge = datamodule is not None
         self.retrobridge_eval_every = retrobridge_eval_every
+
+        # enhancer
+        self.eval_fbd = eval_fbd
+        self.fbd_every = fbd_every
+        if eval_fbd:
+            self.fbd = FBD(
+                dim=4,
+                k=500,
+                num_cls=47 if mel_or_dna else 81,
+                hidden=128,  # read config
+                depth=4 if mel_or_dna else 1,
+                ckpt_path=fbd_classifier_path,
+            )
+            self.val_fbd = MeanMetric()
+            self.test_fbd = MeanMetric()
 
         # retrobridge variables
         if datamodule is not None:
@@ -177,6 +195,8 @@ class SFMModule(LightningModule):
                 use_context=use_context,
             )
             self.val_molecular_metrics = SamplingMolecularMetrics(self.dataset_infos, datamodule.train_smiles,)
+        else:
+            self.dataset_infos = None
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """Perform a forward pass through the model `self.net`."""
@@ -188,9 +208,11 @@ class SFMModule(LightningModule):
         # so it's worth to make sure validation metrics don't store results from these checks
         self.val_loss.reset()
         self.sp_mse.reset()
+        if hasattr(self, "val_fbd"):
+            self.val_fbd.reset()
 
     def model_step(
-        self, x_1: torch.Tensor, signal: torch.Tensor | None = None,
+        self, x_1: torch.Tensor, extra_args: dict[str, torch.Tensor] | None = None,
     ) -> torch.Tensor:
         """
         Perform a single model step on a batch of data.
@@ -202,9 +224,8 @@ class SFMModule(LightningModule):
             self.manifold,
             self.net,
             self.sampler,
-            signal=signal,
             closed_form_drv=self.closed_form_drv,
-            stochastic=self.stochastic,
+            extra_args=extra_args,
         )[0]
 
     def retrobridge_step(
@@ -380,20 +401,11 @@ class SFMModule(LightningModule):
         """
         if not self.closed_form_drv:
             with torch.inference_mode(False):
-                if self.stochastic:
-                    raise NotImplementedError("Stochastic closed-form not implemented.")
-                # https://github.com/facebookresearch/riemannian-fm/blob/main/manifm/model_pl.py
-                    def cond_u(x0, x1, t):
-                        path = perturbed_geodesic(self.manifold.sphere, x0, x1)
-                        x_t, u_t = jvp(path, (t,), (torch.ones_like(t).to(t),))
-                        return x_t, u_t
-                    x_t, target = vmap(cond_u)(x_0, x_1, t)
-                else:
-                    def cond_u(x0, x1, t):
-                        path = geodesic(self.manifold.sphere, x0, x1)
-                        x_t, u_t = jvp(path, (t,), (torch.ones_like(t).to(t),))
-                        return x_t, u_t
-                    x_t, target = vmap(cond_u)(x_0, x_1, time)
+                def cond_u(x0, x1, t):
+                    path = geodesic(self.manifold.sphere, x0, x1)
+                    x_t, u_t = jvp(path, (t,), (torch.ones_like(t).to(t),))
+                    return x_t, u_t
+                x_t, target = vmap(cond_u)(x_0, x_1, time)
             x_t = x_t.squeeze()
             target = target.squeeze()
             if x_0.size(0) == 1:
@@ -415,7 +427,7 @@ class SFMModule(LightningModule):
     
     def retrobridge_eval(self):
         samples_left_to_generate = self.samples_to_generate
-        samples_left_to_save = 0# self.samples_to_save
+        samples_left_to_save = 0 # self.samples_to_save
         chains_left_to_save = self.chains_to_save
 
         samples = []
@@ -517,10 +529,7 @@ class SFMModule(LightningModule):
         modifiable_nodes = (product.X[..., -1] == 1).unsqueeze(-1)
         assert torch.all(fixed_nodes | modifiable_nodes)
         # start!
-        for i in range(self.inference_steps):
-            if self.stochastic and not (i == 0 or i == self.inference_steps - 1):
-                X = metropolis_sphere_perturbation(X, default_perturbation_schedule(t))
-                E = metropolis_sphere_perturbation(E, default_perturbation_schedule(t))
+        for _ in range(self.inference_steps):
             noisy_data = {
                 "t": t,
                 "E_t": E,
@@ -533,7 +542,6 @@ class SFMModule(LightningModule):
             # prep
             target_edge_shape = (E.size(0), -1, E.size(-1))
             # make a step
-            # print(t[0], pred.X.square().sum(dim=(-1, -2)).mean(), pred.E.square().sum(dim=(-1, -2, -3)).mean())
             X = self.manifold.exp_map(
                 X, self.manifold.make_tangent(X, pred.X) * dt,
             )
@@ -576,8 +584,11 @@ class SFMModule(LightningModule):
         if isinstance(x_1, list):
             x_1, signal = x_1
             # Only one of the two signal inputs is used (the first one)
-            signal = signal[:, :, 0].unsqueeze(-1)
-            loss = self.model_step(x_1, signal)
+            if len(signal.shape) == 2:
+                signal = signal[:, :, 0].unsqueeze(-1)
+                loss = self.model_step(x_1, {"signal": signal})
+            else:
+                loss = self.model_step(x_1, {"cls": signal})
         elif isinstance(x_1, Batch):
             loss = self.retrobridge_step(x_1)
         else:
@@ -603,8 +614,11 @@ class SFMModule(LightningModule):
         if isinstance(x_1, list):
             x_1, signal = x_1
             # Only one of the two signal inputs is used (the first one)
-            signal = signal[:, :, 0].unsqueeze(-1)
-            loss = self.model_step(x_1, signal)
+            if len(signal.shape) == 2:
+                signal = signal[:, :, 0].unsqueeze(-1)
+                loss = self.model_step(x_1, {"signal": signal})
+            else:
+                loss = self.model_step(x_1, {"cls": signal})
         elif isinstance(x_1, Batch):
             loss = self.retrobridge_step(x_1)
         else:
@@ -617,6 +631,9 @@ class SFMModule(LightningModule):
             mse = self.compute_sp_mse(x_1, signal, batch_idx)
             self.sp_mse(mse)
             self.log("val/sp-mse", self.sp_mse, on_step=False, on_epoch=True, prog_bar=True)
+        if self.eval_fbd and (self.current_epoch + 1) % self.fbd_every == 0:
+            self.val_fbd(self.compute_fbd(x_1, signal, batch_idx))
+            self.log("val/fbd", self.val_fbd, on_step=False, on_epoch=True, prog_bar=True)
 
     def on_validation_epoch_end(self) -> None:
         """Lightning hook that is called when a validation epoch ends."""
@@ -648,8 +665,11 @@ class SFMModule(LightningModule):
         if isinstance(x_1, list):
             x_1, signal = x_1
             # Only one of the two signal inputs is used (the first one)
-            signal = signal[:, :, 0].unsqueeze(-1)
-            loss = self.model_step(x_1, signal)
+            if len(signal.shape) == 2:
+                signal = signal[:, :, 0].unsqueeze(-1)
+                loss = self.model_step(x_1, {"signal": signal})
+            else:
+                loss = self.model_step(x_1, {"cls": signal})
         elif isinstance(x_1, Batch):
             loss = self.retrobridge_step(x_1)
         else:
@@ -662,6 +682,9 @@ class SFMModule(LightningModule):
             mse = self.compute_sp_mse(x_1, signal)
             self.test_sp_mse(mse)
             self.log("test/sp-mse", self.test_sp_mse, on_step=False, on_epoch=True, prog_bar=True)
+        if self.eval_fbd:
+            self.test_fbd(self.compute_fbd(x_1, signal, None))
+            self.log("test/fbd", self.test_fbd, on_step=False, on_epoch=True, prog_bar=True)
 
     def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
         if self.debug_grads:
@@ -707,6 +730,24 @@ class SFMModule(LightningModule):
         mx = torch.argmax(pred, dim=-1)
         one_hot = F.one_hot(mx, num_classes=4)
         return SeiEval().eval_sp_mse(seq_one_hot=one_hot, target=x_1, b_index=batch_idx)
+
+    def compute_fbd(
+        self,
+        x_1: torch.Tensor,
+        signal: torch.Tensor,
+        batch_idx: int | None,
+    ):
+        """
+        Computes the FBD.
+        """
+        eval_model = partial(self.net, cls=signal)
+        pred = self.manifold.tangent_euler(
+            self.manifold.uniform_prior(*x_1.shape).to(self.device),
+            eval_model,
+            self.inference_steps,
+            tangent=self.tangent_euler,
+        )
+        return self.fbd(pred.argmax(dim=-1), x_1.argmax(dim=-1), batch_idx)
 
     def optimizer_step(self, *args, **kwargs):
         super().optimizer_step(*args, **kwargs)
