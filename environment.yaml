@@ -56,10 +56,10 @@ dependencies:
     - torchdiffeq==0.2.3
     - transformers==4.40.2
     - schedulefree==1.2.5
+    - dgl==2.1.0
     - hydra-optuna-sweeper
     - hydra-colorlog
     - rootutils
-
 
   # --------- loggers --------- #
   # - wandb

@@ -4,3 +4,5 @@ from .gnn import *
 from .layers import *
 from .arch import TMLP, TMLPSignal
 from .multiflow import GPT
+from .gvp import *
+from .vector_field import *
