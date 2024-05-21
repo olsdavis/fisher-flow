@@ -805,7 +805,7 @@ class SFMModule(LightningModule):
             mse = self.compute_sp_mse(x_1, signal)
             self.test_sp_mse(mse)
             self.log("test/sp-mse", self.test_sp_mse, on_step=False, on_epoch=True, prog_bar=True)
-        if self.eval_fbd:
+        if False and self.eval_fbd:
             self.test_fbd(self.compute_fbd(x_1, signal, self.inference_steps, None))
             self.log("test/fbd", self.test_fbd, on_step=False, on_epoch=True, prog_bar=True)
         if self.eval_ppl:

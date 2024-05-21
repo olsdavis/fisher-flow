@@ -7,4 +7,4 @@
 #SBATCH --qos=medium
 #SBATCH --gres=gpu:1
 conda activate sfm
-srun -u python -m src.train experiment=enhancer_mel_sfm_cnn trainer.max_epochs=800 trainer=gpu seed=$1 logger=wandb
+srun -u python -m src.train experiment=enhancer_sfm_bmlp trainer.max_epochs=800 trainer=gpu seed=$1 logger=wandb

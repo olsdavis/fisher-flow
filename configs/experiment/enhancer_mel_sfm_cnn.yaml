@@ -35,7 +35,7 @@ model:
   manifold: sphere
   ot_method: None
   fbd_every: 10
-  eval_ppl: true
+  eval_ppl: false
   normalize_loglikelihood: true
   eval_fbd: true
   mel_or_dna: true  # MEL
@@ -51,6 +51,6 @@ logger:
     tags: ${tags}
     name: enhancer_mel_s${seed}_lr${model.optimizer.lr}
     group: "enhancer"
-    project: sfm
+    project: enhancer-mel
   aim:
     experiment: "enhancer_mel"
