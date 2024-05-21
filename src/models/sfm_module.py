@@ -708,7 +708,7 @@ class SFMModule(LightningModule):
             self.val_ppl(ppl)
             self.log("val/ppl", self.val_ppl, on_step=False, on_epoch=True, prog_bar=True)
         if self.eval_fbd and (self.trainer.current_epoch + 1) % self.fbd_every == 0:
-            self.val_fbd(self.compute_fbd(x_1, signal, batch_idx))
+            self.val_fbd(self.compute_fbd(x_1, signal, self.inference_steps // 4, batch_idx))
             self.log("val/fbd", self.val_fbd, on_step=False, on_epoch=True, prog_bar=True)
 
     def on_validation_epoch_end(self) -> None:
@@ -765,7 +765,7 @@ class SFMModule(LightningModule):
             self.test_sp_mse(mse)
             self.log("test/sp-mse", self.test_sp_mse, on_step=False, on_epoch=True, prog_bar=True)
         if self.eval_fbd:
-            self.test_fbd(self.compute_fbd(x_1, signal, None))
+            self.test_fbd(self.compute_fbd(x_1, signal, self.inference_steps, None))
             self.log("test/fbd", self.test_fbd, on_step=False, on_epoch=True, prog_bar=True)
         if self.eval_ppl:
             net = self.net if signal is None else (
@@ -829,6 +829,7 @@ class SFMModule(LightningModule):
         self,
         x_1: torch.Tensor,
         signal: torch.Tensor,
+        steps: int,
         batch_idx: int | None,
     ):
         """
@@ -838,7 +839,7 @@ class SFMModule(LightningModule):
         pred = self.manifold.tangent_euler(
             self.manifold.uniform_prior(*x_1.shape).to(self.device),
             eval_model,
-            self.inference_steps,
+            steps=steps,
             tangent=self.tangent_euler,
         )
         return self.fbd(pred.argmax(dim=-1), x_1.argmax(dim=-1), batch_idx)
