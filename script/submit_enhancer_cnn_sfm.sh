@@ -4,7 +4,7 @@
 #SBATCH --output=slurm/slurm_%j.out
 #SBATCH --error=slurm/slurm_%j.err
 #SBATCH --time=23:00:00
-#SBATCH --qos=long
+#SBATCH --qos=medium
 #SBATCH --gres=gpu:1
 conda activate sfm
 srun -u python -m src.train experiment=enhancer_mel_sfm_cnn trainer.max_epochs=800 trainer=gpu seed=$1 logger=wandb

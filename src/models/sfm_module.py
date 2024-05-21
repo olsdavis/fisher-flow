@@ -707,7 +707,7 @@ class SFMModule(LightningModule):
             ).mean()
             self.val_ppl(ppl)
             self.log("val/ppl", self.val_ppl, on_step=False, on_epoch=True, prog_bar=True)
-        if self.eval_fbd and (self.current_epoch + 1) % self.fbd_every != 0:
+        if self.eval_fbd and (self.trainer.current_epoch + 1) % self.fbd_every == 0:
             self.val_fbd(self.compute_fbd(x_1, signal, batch_idx))
             self.log("val/fbd", self.val_fbd, on_step=False, on_epoch=True, prog_bar=True)
 
