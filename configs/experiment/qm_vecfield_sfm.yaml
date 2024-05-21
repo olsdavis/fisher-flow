@@ -29,6 +29,8 @@ model:
     n_atom_types: 5
   inference_steps: 100
   manifold: sphere
+  closed_form_drv: false
+  tangent_wrapper: false
 
 logger:
   wandb:

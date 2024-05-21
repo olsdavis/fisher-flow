@@ -10,6 +10,10 @@ from lightning.pytorch.utilities import grad_norm
 from torchmetrics import MeanMetric, MinMetric, MaxMetric
 from torch_ema import ExponentialMovingAverage
 from torch_geometric.data import Batch
+from torch_geometric.utils import (
+    to_dense_batch, to_dense_adj, from_dgl
+)
+from geoopt import Euclidean
 from tqdm import tqdm
 import schedulefree
 from dgl import DGLGraph
@@ -95,6 +99,7 @@ class SFMModule(LightningModule):
         closed_form_drv: bool = False,
         debug_grads: bool = False,
         inference_steps: int = 100,
+        tangent_wrapper: bool = True,
         datamodule: Any = None,  # in retrobridge
         # enhancer
         eval_fbd: bool = False,
@@ -142,7 +147,7 @@ class SFMModule(LightningModule):
         self.promoter_eval = promoter_eval
         self.manifold = manifold_from_name(manifold)
         # don't wrap for retrobridge!
-        self.net = TangentWrapper(self.manifold, net).to(self.device) if not datamodule else net
+        self.net = net if not tangent_wrapper or datamodule is not None else TangentWrapper(self.manifold, net)
         if ema:
             self.ema = ExponentialMovingAverage(self.net.parameters(), decay=ema_decay).to(self.device)
         else:
@@ -466,9 +471,9 @@ class SFMModule(LightningModule):
         else:
             mask = torch.isclose(x_0.square().sum(dim=-1), torch.tensor(1.0))
             x_t = torch.zeros_like(x_0)
-            x_t[mask] = self.manifold.geodesic_interpolant(x_0, x_1, t)[mask]
+            x_t[mask] = self.manifold.geodesic_interpolant(x_0, x_1, time)[mask]
             x_t[mask] = metropolis_sphere_perturbation(
-                x_t, default_perturbation_schedule(t)
+                x_t, default_perturbation_schedule(time)
             )[mask]
             target = torch.zeros_like(x_t)
             target[mask] = self.manifold.log_map(x_0, x_1)[mask]
@@ -503,15 +508,6 @@ class SFMModule(LightningModule):
             batch_groups = []
             # batch_scores = []
             for sample_idx in range(self.samples_per_input):
-                """molecule_list, true_molecule_list, products_list, scores, _, _ = self.sample_batch(
-                    data=data,
-                    batch_id=ident,
-                    batch_size=to_generate,
-                    save_final=to_save,
-                    keep_chain=chains_save,
-                    number_chain_steps_to_save=self.number_chain_steps_to_save,
-                    sample_idx=sample_idx,
-                )"""
                 mol_sample = self.sample_molecule(data)
                 molecule_list = retrobridge_utils.create_pred_reactant_molecules(mol_sample.X, mol_sample.E, data.batch, to_generate)
                 samples.extend(molecule_list)
@@ -638,6 +634,11 @@ class SFMModule(LightningModule):
             rets += ["".join([self.trainer.datamodule.itos[c.item()] for c in sample])]
         return rets
 
+    def densify_dgl_edges(self, graph: DGLGraph, edges_attr: torch.Tensor, node_batch_idx: torch.Tensor) -> torch.Tensor:
+        graph.edata["edge_attr"] = edges_attr
+        tg = from_dgl(graph)
+        return to_dense_adj(tg.edge_index, node_batch_idx, tg.edge_attr)
+
     def qm_step(self, graph: DGLGraph) -> torch.Tensor:
         """
         Perform a single step on a QM9 graph.
@@ -646,34 +647,41 @@ class SFMModule(LightningModule):
         node_batch_idx = get_node_batch_idxs(graph)
         edge_upper_index = get_upper_edge_mask(graph)
         # random positions
-        # x_0 = self.manifold.uniform_prior(*graph.ndata["x_1_true"].shape).to(graph.device)
-        a_1 = graph.ndata["a_1_true"].unsqueeze(0)
-        c_1 = graph.ndata["c_1_true"].unsqueeze(0)
+        e_1 = self.densify_dgl_edges(graph, graph.edata["e_1_true"], node_batch_idx)
+        x_1, x_mask = to_dense_batch(graph.ndata["x_1_true"], node_batch_idx)
+        a_1, a_mask = to_dense_batch(graph.ndata["a_1_true"], node_batch_idx)
+        c_1, c_mask = to_dense_batch(graph.ndata["c_1_true"], node_batch_idx)
+        edges_flat = e_1.reshape(e_1.size(0), -1, e_1.size(-1))
+        x_0 = torch.randn_like(x_1)  # positions!
+        e_0 = self.manifold.uniform_prior(*edges_flat.shape).to(graph.device)
         a_0 = self.manifold.uniform_prior(*a_1.shape).to(graph.device)
         c_0 = self.manifold.uniform_prior(*c_1.shape).to(graph.device)
-        edges = graph.edata["e_1_true"]
-        edges_flat = edges.reshape(edges.size(0), -1, edges.size(-1))
-        e_0 = self.manifold.uniform_prior(*edges_flat.shape).to(graph.device)
 
         # sample points
-        print(a_0.shape, a_1.shape)
+        # to_dense_adj(graph.adj().to_dense(), node_batch_idx, graph.edata["e_1_true"])
+        # need to compute target wrt Euclidean flow matching
+        # x_t, x_target = ...
         a_t, a_target = self.compute_target(a_0, a_1, t)
-        e_t, e_target = self.compute_target(e_0, edges_flat, t)
         c_t, c_target = self.compute_target(c_0, c_1, t)
+        e_t, e_target = self.compute_target(e_0, edges_flat, t)
+        e_t = e_t.reshape_as(e_1)
+        e_1_mask = torch.isclose(e_1.sum(dim=-1), torch.tensor(1.0))
+        e_t = e_t[e_1_mask]
 
-        graph.ndata["a_t"] = a_t
-        graph.ndata["c_t"] = c_t
-        graph.edata["e_t"] = e_t.reshape_as(edges)
-        ret_dict = self.model(graph, t, node_batch_idx, edge_upper_index)
+        graph.ndata["a_t"] = a_t[a_mask]
+        graph.ndata["c_t"] = c_t[c_mask]
+        graph.edata["e_t"] = e_t
+        graph.ndata["x_t"] = (x_0 * t.unsqueeze(-1) + x_1 * (1 - t.unsqueeze(-1)))[x_mask]
+        ret_dict = self.net(graph, t.squeeze(), node_batch_idx, edge_upper_index)
         a_pred = ret_dict["a"]
         c_pred = ret_dict["c"]
-        e_pred = ret_dict["e"].reshape_as(e_target)
+        e_pred = ret_dict["e"]
+        x_pred = ret_dict["x"]
         return (
-            (a_pred - a_target).square().sum(dim=(-1, -2))
-            + (c_pred - c_target).square().sum(dim=(-1, -2))
-            + (e_pred - e_target).square().sum(dim=(-1, -2))
-        ).mean()
-
+            (a_pred - a_target[a_mask]).square().sum(dim=-1)
+            + (x_pred - (x_1 - x_0)[x_mask]).square().sum(dim=-1)
+            + (c_pred - c_target[c_mask]).square().sum(dim=-1)
+        ).mean() + + (e_pred - e_target[e_1_mask.reshape(e_1_mask.size(0), -1)][edge_upper_index]).square().sum(dim=-1).mean()
 
     def training_step(
         self, x_1: torch.Tensor | list[torch.Tensor] | Batch, batch_idx: int,
