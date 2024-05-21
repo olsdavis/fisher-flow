@@ -3,6 +3,7 @@ import argparse
 from experiment import (
     run_dfm_toy_experiment,
     run_simple_experiment,
+    run_retrobridge_experiment,
 )
 
 
@@ -11,6 +12,7 @@ def main():
     experiments_available = {
         "dfm_toy": run_dfm_toy_experiment,
         "simple": run_simple_experiment,
+        "retrobridge": run_retrobridge_experiment,
     }
 
     # args
@@ -20,6 +22,8 @@ def main():
     )
     # What manifold to use?
     parser.add_argument("--manifold", "-m", type=str, default="simplex", choices=["simplex", "sphere"])
+    # OT?
+    parser.add_argument("--ot", action="store_true", default=False)
     # What experiment to run?
     parser.add_argument("--experiment", "-e", type=str, choices=experiments_available.keys())
     # How many steps to use in inference? (Used also for KL, for instance.)

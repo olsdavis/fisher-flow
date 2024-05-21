@@ -78,7 +78,7 @@ class ProductMLP(nn.Module):
         k: int,
         hidden: int,
         depth: int,
-        simplex_tangent: bool = True,
+        simplex_tangent: bool = False,
         activation: str = "relu",
         **_,
     ):

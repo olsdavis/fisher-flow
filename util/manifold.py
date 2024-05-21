@@ -111,6 +111,7 @@ class Manifold(ABC):
         for _ in range(steps):
             t += dt
             x = self.exp_map(x, self.make_tangent(x, model(x, t)) * dt)
+            x = self.project(x)
         return x
 
     def pairwise_geodesic_distance(
@@ -174,6 +175,12 @@ class Manifold(ABC):
         """
         Calculates the Riemannian metric at point `x` between
         `u` and `v`.
+        """
+
+    @abstractmethod
+    def project(self, x: Tensor) -> Tensor:
+        """
+        Projects `x` to the manifold.
         """
 
     def square_norm_at(self, x: Tensor, v: Tensor) -> Tensor:
@@ -289,14 +296,21 @@ class NSimplex(Manifold):
         TODO Check if the tangent plane is indeed independent of the point,
         in the simplex.
         """
-        s = v.sum(dim=-1, keepdim=True)
-        return torch.cat([v, -s], dim=-1)
+        # s = v.sum(dim=-1, keepdim=True)
+        # return torch.cat([v, -s], dim=-1)
+        return v - v.mean(dim=-1, keepdim=True)
 
     def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
         """
         See `Manifold.uniform_prior`.
         """
         return Dirichlet(torch.ones((k, d))).sample((n,))
+
+    def project(self, x: Tensor) -> Tensor:
+        """
+        See `Manifold.project`.
+        """
+        return x / x.sum(dim=-1, keepdim=True)
 
     @torch.no_grad()
     def smooth_labels(self, labels: Tensor, mx: float = 0.98) -> Tensor:
@@ -374,7 +388,13 @@ class NSphere(Manifold):
         # last coordinate must be -(curr) / p_n
         last = -(curr / p[:, :, -1].unsqueeze(-1))
         return torch.cat([v, last], dim=-1)"""
-        return (v - p * (p * v).sum(dim=-1, keepdim=True))
+        return v - p * (p * v).sum(dim=-1, keepdim=True)
+
+    def project(self, x: Tensor) -> Tensor:
+        """
+        See `Manifold.project`.
+        """
+        return x / x.norm(p=2, dim=-1, keepdim=True)
 
     def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
         """
