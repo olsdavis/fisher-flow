@@ -4,3 +4,4 @@ from .sei import *
 from .molecule import *
 from .molecule_prior import *
 from .qm_utils import *
+from .molecule_builder import *

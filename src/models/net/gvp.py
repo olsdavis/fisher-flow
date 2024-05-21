@@ -156,17 +156,15 @@ class _VDropout(nn.Module):
     def __init__(self, drop_rate):
         super(_VDropout, self).__init__()
         self.drop_rate = drop_rate
-        self.dummy_param = nn.Parameter(torch.empty(0))
 
     def forward(self, x):
         '''
         :param x: `torch.Tensor` corresponding to vector channels
         '''
-        device = self.dummy_param.device
         if not self.training:
             return x
         mask = torch.bernoulli(
-            (1 - self.drop_rate) * torch.ones(x.shape[:-1], device=device)
+            (1 - self.drop_rate) * torch.ones(x.shape[:-1], device=x.device)
         ).unsqueeze(-1)
         x = mask * x / (1 - self.drop_rate)
         return x

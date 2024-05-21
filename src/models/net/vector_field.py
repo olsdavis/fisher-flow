@@ -93,7 +93,7 @@ class EndpointVectorField(nn.Module):
             n_updaters = n_molecule_updates
         else:
             n_updaters = 1
-        for _ in range(n_updaters):
+        for _ in range(n_updaters - 1):
             self.node_position_updaters.append(NodePositionUpdate(n_hidden_scalars, n_vec_channels, n_gvps=3, n_cp_feats=n_cp_feats))
             self.edge_updaters.append(EdgeUpdate(n_hidden_scalars, n_hidden_edge_feats, update_edge_w_distance=update_edge_w_distance, rbf_dim=rbf_dim))
 
@@ -160,7 +160,7 @@ class EndpointVectorField(nn.Module):
                     if conv_idx != 0 and (conv_idx + 1) % self.convs_per_update == 0:
 
                         if self.separate_mol_updaters:
-                            updater_idx = conv_idx // self.convs_per_update
+                            updater_idx = conv_idx // self.convs_per_update - 1
                         else:
                             updater_idx = 0
 

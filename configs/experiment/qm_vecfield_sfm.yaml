@@ -23,7 +23,6 @@ trainer:
 
 model:
   compile: false
-  promoter_eval: true
   ot_method: None
   net:
     n_atom_types: 5
@@ -31,12 +30,15 @@ model:
   manifold: sphere
   closed_form_drv: false
   tangent_wrapper: false
+  eval_unconditional_mols: true
+  eval_n_mols: 64
+  eval_unconditional_mols_every: 10
 
 logger:
   wandb:
     tags: ${tags}
     group: "qm9"
-    name: qm9_s{seed}
+    name: qm9_s${seed}
     project: sfm-qm9
   aim:
     experiment: "qm9"

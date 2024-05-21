@@ -2,7 +2,7 @@
 _target_: src.data.MoleculeDataModule
 dataset_config: xxx
 dm_prior_config: xxx
-batch_size: 256 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
-num_workers: 4
+batch_size: 384 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
+num_workers: 32
 distributed: false
 max_num_edges: 4000
