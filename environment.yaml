@@ -56,7 +56,7 @@ dependencies:
     - torchdiffeq==0.2.3
     - transformers==4.40.2
     - schedulefree==1.2.5
-    - dgl==2.1.0
+    - dgl==https://data.dgl.ai/wheels/torch-2.1/cu121/repo.html
     - pydantic==2.7.1
     - hydra-optuna-sweeper
     - hydra-colorlog

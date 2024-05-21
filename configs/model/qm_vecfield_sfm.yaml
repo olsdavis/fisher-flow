@@ -1,0 +1,35 @@
+_target_: src.models.SFMModule
+
+optimizer:
+  _target_: torch.optim.AdamW
+  _partial_: true
+  lr: 0.001
+  weight_decay: 0.0
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+  _partial_: true
+  # mode: min
+  # factor: 0.1
+  # patience: 10
+  T_max: 1000
+  eta_min: 0.00008
+
+net:
+  _target_: src.models.net.VectorField
+  n_vec_channels: 16
+  update_edge_w_distance: True
+  n_hidden_scalars: 256
+  n_hidden_edge_feats: 128 
+  n_recycles: 1
+  separate_mol_updaters: True
+  n_molecule_updates: 8
+  convs_per_update: 1
+  n_cp_feats: 4
+  n_message_gvps: 3
+  n_update_gvps: 3
+  message_norm: 100
+  rbf_dmax: 14
+  rbf_dim: 16
+
+compile: false

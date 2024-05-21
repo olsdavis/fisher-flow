@@ -20,8 +20,6 @@ trainer:
   min_epochs: 1
   max_epochs: 800
   gradient_clip_val: 1.0
-  accelerator: 'gpu'
-  devices: [3]
 
 model:
   optimizer:

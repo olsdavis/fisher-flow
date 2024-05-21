@@ -23,16 +23,37 @@ class MoleculeDataModule(LightningDataModule):
         max_num_edges: int = 40000,
     ):
         super().__init__()
-        dataset_config = {
+        self.distributed = distributed
+        self.dataset_config = {
             'processed_data_dir': 'data/qm9',
             'raw_data_dir': 'data/qm9_raw',
             'dataset_name': 'qm9',
         }
-        self.distributed = distributed
-        self.dataset_config = dataset_config
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.prior_config = dm_prior_config
+        self.prior_config = {
+            'a': {
+                'align': False,
+                'kwargs': {},
+                'type': 'gaussian',
+            },
+            'c': {
+                'align': False,
+                'kwargs': {},
+                'type': 'gaussian',
+            },
+            'e': {
+                'align': False,
+                'kwargs': {},
+                'type': 'gaussian',
+            },
+            'x': {
+                'align': True,
+                'kwargs': {},
+                'std': 1.0,
+                'type': 'centered-normal',
+            },
+        }
         self.max_num_edges = max_num_edges
         self.save_hyperparameters()
         self.train_dataset = None

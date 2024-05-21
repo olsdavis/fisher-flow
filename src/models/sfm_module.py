@@ -12,6 +12,7 @@ from torch_ema import ExponentialMovingAverage
 from torch_geometric.data import Batch
 from tqdm import tqdm
 import schedulefree
+from dgl import DGLGraph
 
 
 from src.sfm import (
@@ -27,6 +28,7 @@ from src.sfm import (
 from src.models.net import TangentWrapper
 from src.data.components.promoter_eval import SeiEval
 from src.data.components.fbd import FBD
+from src.data.components.qm_utils import *
 from src.data import RetroBridgeDatasetInfos, PlaceHolder, retrobridge_utils
 from src.experiments.retrosynthesis import (
     DummyExtraFeatures,
@@ -636,6 +638,43 @@ class SFMModule(LightningModule):
             rets += ["".join([self.trainer.datamodule.itos[c.item()] for c in sample])]
         return rets
 
+    def qm_step(self, graph: DGLGraph) -> torch.Tensor:
+        """
+        Perform a single step on a QM9 graph.
+        """
+        t = torch.rand(graph.batch_size, 1, device=graph.device)
+        node_batch_idx = get_node_batch_idxs(graph)
+        edge_upper_index = get_upper_edge_mask(graph)
+        # random positions
+        # x_0 = self.manifold.uniform_prior(*graph.ndata["x_1_true"].shape).to(graph.device)
+        a_1 = graph.ndata["a_1_true"].unsqueeze(0)
+        c_1 = graph.ndata["c_1_true"].unsqueeze(0)
+        a_0 = self.manifold.uniform_prior(*a_1.shape).to(graph.device)
+        c_0 = self.manifold.uniform_prior(*c_1.shape).to(graph.device)
+        edges = graph.edata["e_1_true"]
+        edges_flat = edges.reshape(edges.size(0), -1, edges.size(-1))
+        e_0 = self.manifold.uniform_prior(*edges_flat.shape).to(graph.device)
+
+        # sample points
+        print(a_0.shape, a_1.shape)
+        a_t, a_target = self.compute_target(a_0, a_1, t)
+        e_t, e_target = self.compute_target(e_0, edges_flat, t)
+        c_t, c_target = self.compute_target(c_0, c_1, t)
+
+        graph.ndata["a_t"] = a_t
+        graph.ndata["c_t"] = c_t
+        graph.edata["e_t"] = e_t.reshape_as(edges)
+        ret_dict = self.model(graph, t, node_batch_idx, edge_upper_index)
+        a_pred = ret_dict["a"]
+        c_pred = ret_dict["c"]
+        e_pred = ret_dict["e"].reshape_as(e_target)
+        return (
+            (a_pred - a_target).square().sum(dim=(-1, -2))
+            + (c_pred - c_target).square().sum(dim=(-1, -2))
+            + (e_pred - e_target).square().sum(dim=(-1, -2))
+        ).mean()
+
+
     def training_step(
         self, x_1: torch.Tensor | list[torch.Tensor] | Batch, batch_idx: int,
     ) -> torch.Tensor:
@@ -656,6 +695,8 @@ class SFMModule(LightningModule):
                 loss = self.model_step(x_1, {"cls": signal})
         elif isinstance(x_1, Batch):
             loss = self.retrobridge_step(x_1)
+        elif isinstance(x_1, DGLGraph):
+            loss = self.qm_step(x_1)
         else:
             loss = self.model_step(x_1)
 
