@@ -274,7 +274,7 @@ class VectorField(EndpointVectorField):
         
         # predict the destination of the trajectory given the current timepoint
         vec_field = self(
-            g, 
+            g,
             t=torch.full((g.batch_size,), t_i, device=g.device),
             node_batch_idx=node_batch_idx,
             upper_edge_mask=upper_edge_mask,

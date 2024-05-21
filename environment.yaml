@@ -57,6 +57,7 @@ dependencies:
     - transformers==4.40.2
     - schedulefree==1.2.5
     - dgl==2.1.0
+    - pydantic==2.7.1
     - hydra-optuna-sweeper
     - hydra-colorlog
     - rootutils

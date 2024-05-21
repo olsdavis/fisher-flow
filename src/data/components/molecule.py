@@ -113,19 +113,19 @@ class MoleculeDataset(torch.utils.data.Dataset):
         g.ndata['c_1_true'] = atom_charges
 
         # sample prior for node features, coupled to the destination features
-        dst_dict = {
+        """dst_dict = {
             'x': positions,
             'a': atom_types,
             'c': atom_charges
-        }
-        prior_node_feats = coupled_node_prior(dst_dict=dst_dict, prior_config=self.prior_config)
-        for feat in prior_node_feats:
-            g.ndata[f'{feat}_0'] = prior_node_feats[feat]
+        }"""
+        # prior_node_feats = coupled_node_prior(dst_dict=dst_dict, prior_config=self.prior_config)
+        # for feat in prior_node_feats:
+        #     g.ndata[f'{feat}_0'] = prior_node_feats[feat]
 
         # sample the prior for the edge features    
         upper_edge_mask = torch.zeros(g.num_edges(), dtype=torch.bool)
         n_upper_edges = upper_edge_idxs.shape[1]
         upper_edge_mask[:n_upper_edges] = True
-        g.edata['e_0'] = edge_prior(upper_edge_mask, self.prior_config['e'])
+        # g.edata['e_0'] = edge_prior(upper_edge_mask, self.prior_config['e'])
 
         return g

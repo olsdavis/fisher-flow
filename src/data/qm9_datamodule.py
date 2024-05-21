@@ -23,6 +23,11 @@ class MoleculeDataModule(LightningDataModule):
         max_num_edges: int = 40000,
     ):
         super().__init__()
+        dataset_config = {
+            'processed_data_dir': 'data/qm9',
+            'raw_data_dir': 'data/qm9_raw',
+            'dataset_name': 'qm9',
+        }
         self.distributed = distributed
         self.dataset_config = dataset_config
         self.batch_size = batch_size
@@ -30,9 +35,14 @@ class MoleculeDataModule(LightningDataModule):
         self.prior_config = dm_prior_config
         self.max_num_edges = max_num_edges
         self.save_hyperparameters()
+        self.train_dataset = None
+        self.val_dataset = None
+        self.test_dataset = None
 
     def prepare_data(self) -> None:
-
+        """Nothing to do"""
+    
+    def setup(self, stage: str | None = None) -> None:
         self.train_dataset = MoleculeDataset(
             'train', 
             self.dataset_config, 
@@ -50,9 +60,6 @@ class MoleculeDataModule(LightningDataModule):
             self.dataset_config, 
             prior_config=self.prior_config,
         )
-    
-    def setup(self, stage: str | None = None) -> None:
-        self.prepare_data()
 
     def train_dataloader(self):
         assert self.train_dataset
@@ -162,3 +169,4 @@ if __name__ == "__main__":
     x = next(iter(data_loader))
     print(type(x))
     print(x)
+    import ipdb; ipdb.set_trace()
