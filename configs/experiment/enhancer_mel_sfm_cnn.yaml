@@ -20,6 +20,8 @@ trainer:
   min_epochs: 1
   max_epochs: 800
   gradient_clip_val: 1.0
+  accelerator: 'gpu'
+  devices: [3]
 
 model:
   optimizer:
@@ -49,8 +51,8 @@ data:
 logger:
   wandb:
     tags: ${tags}
-    name: enhancer_mel_s${seed}
+    name: enhancer_mel_s${seed}_lr${model.optimizer.lr}
     group: "enhancer"
-    project: enhancer
+    project: sfm
   aim:
     experiment: "enhancer_mel"
