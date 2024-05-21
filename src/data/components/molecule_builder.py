@@ -181,6 +181,9 @@ class SampledMolecule:
             print(f'WARNING: {len(traj_frames) - len(traj_mols)} frames were not converted to rdkit molecules')
 
         return traj_mols
+
+    def __repr__(self):
+        return f"{self.bond_types}, {self.atom_types}, {self.atom_charges}, {self.positions}"
     
 
 def extract_moldata_from_graph(g: dgl.DGLGraph, atom_type_map: List[str], exclude_charges: bool = False):

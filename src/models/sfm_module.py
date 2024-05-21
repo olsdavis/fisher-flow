@@ -195,6 +195,10 @@ class SFMModule(LightningModule):
         self.eval_unconditional_mols_every = eval_unconditional_mols_every
         if self.eval_unconditional_mols:
             self.n_atoms_dist = build_n_atoms_dist("./data/qm9/train_data_n_atoms_histogram.pt")
+            self.mol_features = ["a", "x", "e", "c"]
+            for ft in self.mol_features:
+                for tp in ["train", "val", "test"]:
+                    setattr(self, f"{tp}_{ft}_loss", MeanMetric())
         # retrobridge:
         self.retrobridge = datamodule is not None
         self.retrobridge_eval_every = retrobridge_eval_every
@@ -696,11 +700,13 @@ class SFMModule(LightningModule):
         c_pred = self.manifold.make_tangent(c_t[c_mask], ret_dict["c"])
         e_pred = self.manifold.make_tangent(e_t[edge_upper_index], ret_dict["e"])
         x_pred = ret_dict["x"]  # euclid, always tangent
-        return (
-            (a_pred - a_target[a_mask]).square().sum(dim=-1)
-            + (x_pred - (x_1 - x_0)[x_mask]).square().sum(dim=-1)
-            + (c_pred - c_target[c_mask]).square().sum(dim=-1)
-        ).mean() + (e_pred - e_target[e_1_mask.reshape(e_1_mask.size(0), -1)][edge_upper_index]).square().sum(dim=-1).mean()
+        
+        # losses
+        a_loss = (a_pred - a_target[a_mask]).square().sum()
+        x_loss = (x_pred - (x_1 - x_0)[x_mask]).square().sum()
+        c_loss = (c_pred - c_target[c_mask]).square().sum()
+        e_loss = (e_pred - e_target[e_1_mask.reshape(e_1_mask.size(0), -1)][edge_upper_index]).square().sum()
+        return (a_loss + x_loss + c_loss + e_loss) / graph.batch_size, a_loss, x_loss, c_loss, e_loss
 
     def quantize(self, tensor: torch.Tensor) -> torch.Tensor:
         """
@@ -782,7 +788,13 @@ class SFMModule(LightningModule):
         elif isinstance(x_1, Batch):
             loss = self.retrobridge_step(x_1)
         elif isinstance(x_1, DGLGraph):
-            loss = self.qm_step(x_1)
+            loss, a_loss, x_loss, c_loss, e_loss  = self.qm_step(x_1)
+            self.train_a_loss(a_loss)
+            self.train_x_loss(x_loss)
+            self.train_c_loss(c_loss)
+            self.train_e_loss(e_loss)
+            for ft in self.mol_features:
+                self.log(f"train/{ft}-loss", getattr(self, f"train_{ft}_loss"), on_step=False, on_epoch=True, prog_bar=True)
         else:
             loss = self.model_step(x_1)
 
@@ -814,7 +826,13 @@ class SFMModule(LightningModule):
         elif isinstance(x_1, Batch):
             loss = self.retrobridge_step(x_1)
         elif isinstance(x_1, DGLGraph):
-            loss = self.qm_step(x_1)
+            loss, a_loss, x_loss, c_loss, e_loss  = self.qm_step(x_1)
+            self.val_a_loss(a_loss)
+            self.val_x_loss(x_loss)
+            self.val_c_loss(c_loss)
+            self.val_e_loss(e_loss)
+            for ft in self.mol_features:
+                self.log(f"val/{ft}-loss", getattr(self, f"val_{ft}_loss"), on_step=False, on_epoch=True, prog_bar=False)
         else:
             loss = self.model_step(x_1)
 
@@ -890,7 +908,13 @@ class SFMModule(LightningModule):
         elif isinstance(x_1, Batch):
             loss = self.retrobridge_step(x_1)
         elif isinstance(x_1, DGLGraph):
-            loss = self.qm_step(x_1)
+            loss, a_loss, x_loss, c_loss, e_loss  = self.qm_step(x_1)
+            self.test_a_loss(a_loss)
+            self.test_x_loss(x_loss)
+            self.test_c_loss(c_loss)
+            self.test_e_loss(e_loss)
+            for ft in self.mol_features:
+                self.log(f"test/{ft}-loss", getattr(self, f"test_{ft}_loss"), on_step=False, on_epoch=True, prog_bar=True)
         else:
             loss = self.model_step(x_1)
 

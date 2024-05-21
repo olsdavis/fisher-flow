@@ -30,6 +30,7 @@ class SampleAnalyzer():
             
 
     def analyze(self, sampled_molecules: List[SampledMolecule], return_counts: bool = False):
+        print("Molecules: ", "\n".join([str(m) for m in sampled_molecules]))
 
         # compute the atom-level stabiltiy of a molecule. this is the number of atoms that have valid valencies.
         # note that since is computed at the atom level, even if the entire molecule is unstable, we can still get an idea
