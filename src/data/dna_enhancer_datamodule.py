@@ -14,7 +14,7 @@ class DNAEnhancerDataModule(LightningDataModule):
     def __init__(
         self,
         dataset: str = "MEL2",
-        data_dir: str = "data/the_code/General/data/Deep",
+        data_dir: str = "data/enhancer/the_code/General/data/Deep",
         train_val_test_split: tuple[int, int, int] = (55_000, 5_000, 10_000),
         batch_size: int = 64,
         num_workers: int = 0,
