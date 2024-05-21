@@ -274,10 +274,6 @@ class SFMModule(LightningModule):
                 optim.eval()
 
     def on_after_backward(self):
-        for param in self.parameters():
-            if not param.requires_grad:
-                print(param)
-        print("DONE")
         for optim in self.trainer.optimizers:
             # schedule free needs to set to train
             if isinstance(optim, schedulefree.AdamWScheduleFree):
@@ -689,6 +685,7 @@ class SFMModule(LightningModule):
         e_t = e_t.reshape_as(e_1)
         e_1_mask = torch.isclose(e_1.sum(dim=-1), torch.tensor(1.0))
         e_t = e_t[e_1_mask]
+        e_t[~edge_upper_index] = e_t[edge_upper_index]
 
         graph.ndata["a_t"] = a_t[a_mask]
         graph.ndata["c_t"] = c_t[c_mask]
@@ -704,6 +701,12 @@ class SFMModule(LightningModule):
             + (x_pred - (x_1 - x_0)[x_mask]).square().sum(dim=-1)
             + (c_pred - c_target[c_mask]).square().sum(dim=-1)
         ).mean() + (e_pred - e_target[e_1_mask.reshape(e_1_mask.size(0), -1)][edge_upper_index]).square().sum(dim=-1).mean()
+
+    def quantize(self, tensor: torch.Tensor) -> torch.Tensor:
+        """
+        Quantizes to one-hot encoding.
+        """
+        return F.one_hot(tensor.argmax(dim=-1), num_classes=tensor.size(-1))
 
     @torch.no_grad()
     def sample_unconditional_molecule(self, n_atoms: torch.Tensor) -> list[SampledMolecule]:
@@ -734,22 +737,20 @@ class SFMModule(LightningModule):
         t = torch.zeros(batch_size, device=self.device)
         for _ in range(self.inference_steps):
             dict_ret = self.net(g, t, node_batch_idx, upper_edge_mask)
-            # make all tangent
-            x = g.ndata["x_t"] + dict_ret["x"] * dt
             a = self.manifold.make_tangent(g.ndata["a_t"], dict_ret["a"])
             c = self.manifold.make_tangent(g.ndata["c_t"], dict_ret["c"])
             e = self.manifold.make_tangent(g.edata["e_t"][upper_edge_mask], dict_ret["e"])
             # update
-            g.ndata["x_t"] = self.manifold.exp_map(g.ndata["x_t"], x * dt)
+            g.ndata["x_t"] = g.ndata["x_t"] + dict_ret["x"] * dt
             g.ndata["a_t"] = self.manifold.exp_map(g.ndata["a_t"], a * dt)
             g.ndata["c_t"] = self.manifold.exp_map(g.ndata["c_t"], c * dt)
             g.edata["e_t"][upper_edge_mask] = self.manifold.exp_map(g.edata["e_t"][upper_edge_mask], e * dt)
             g.edata["e_t"][~upper_edge_mask] = self.manifold.exp_map(g.edata["e_t"][~upper_edge_mask], e * dt)
 
         g.ndata["x_1"] = g.ndata["x_t"]
-        g.ndata["a_1"] = g.ndata["a_t"]
-        g.ndata["c_1"] = g.ndata["c_t"]
-        g.edata["e_1"] = g.edata["e_t"]
+        g.ndata["a_1"] = self.quantize(g.ndata["a_t"])
+        g.ndata["c_1"] = self.quantize(g.ndata["c_t"])
+        g.edata["e_1"] = self.quantize(g.edata["e_t"])
         g.edata["ue_mask"] = upper_edge_mask
         g = g.to("cpu")
 

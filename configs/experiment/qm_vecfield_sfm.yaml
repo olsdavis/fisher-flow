@@ -32,7 +32,8 @@ model:
   tangent_wrapper: false
   eval_unconditional_mols: true
   eval_n_mols: 64
-  eval_unconditional_mols_every: 10
+  eval_unconditional_mols_every: 5
+  fast_matmul: true
 
 logger:
   wandb:
