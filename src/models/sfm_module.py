@@ -746,10 +746,10 @@ class SFMModule(LightningModule):
             pred_dict = self.net(graph, t.squeeze(), node_batch_idx, edge_upper_index, apply_softmax=False, remove_com=True)
 
             # loss is from the paper
-            x_loss = 3.0 * (pred_dict["x"] - graph.ndata["x_1_true"]).square().sum() / graph.batch_size
-            a_loss = 0.4 * F.cross_entropy(pred_dict["a"], graph.ndata["a_1_true"], reduction="sum") / graph.batch_size
-            c_loss = 1.0 * F.cross_entropy(pred_dict["c"], graph.ndata["c_1_true"], reduction="sum") / graph.batch_size
-            e_loss = 2.0 * F.cross_entropy(pred_dict["e"], graph.edata["e_1_true"][edge_upper_index], reduction="sum") / graph.batch_size
+            x_loss = (pred_dict["x"] - graph.ndata["x_1_true"]).square().sum() / graph.batch_size
+            a_loss = F.cross_entropy(pred_dict["a"], graph.ndata["a_1_true"], reduction="sum") / graph.batch_size
+            c_loss = F.cross_entropy(pred_dict["c"], graph.ndata["c_1_true"], reduction="sum") / graph.batch_size
+            e_loss = F.cross_entropy(pred_dict["e"], graph.edata["e_1_true"][edge_upper_index], reduction="sum") / graph.batch_size
             return x_loss + a_loss + c_loss + e_loss, a_loss, x_loss, c_loss, e_loss
 
     def quantize(self, tensor: torch.Tensor) -> torch.Tensor:
@@ -811,7 +811,7 @@ class SFMModule(LightningModule):
                 g.ndata["x_t"] = g.ndata["x_t"] * (1.0 - x_1_weight)[node_batch_idx, None] + dict_ret["x"] * x_1_weight[node_batch_idx, None]
 
                 # things must be on sphere, hence squares
-                mult = (1.0 / (1.0 - t))[node_batch_idx].unsqueeze(-1)
+                mult = x_1_weight[node_batch_idx, None]
                 g.ndata["c_t"] = self.manifold.exp_map(
                     g.ndata["c_t"],
                     mult * self.manifold.log_map(g.ndata["c_t"], dict_ret["c"].square())
