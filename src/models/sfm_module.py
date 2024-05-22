@@ -797,6 +797,7 @@ class SFMModule(LightningModule):
                 g.ndata["c_t"] = self.manifold.exp_map(g.ndata["c_t"], c * dt)
                 g.edata["e_t"][upper_edge_mask] = self.manifold.exp_map(g.edata["e_t"][upper_edge_mask], e * dt)
                 g.edata["e_t"][~upper_edge_mask] = self.manifold.exp_map(g.edata["e_t"][~upper_edge_mask], e * dt)
+                t += dt
 
             g.ndata["x_1"] = g.ndata["x_t"]
             g.ndata["a_1"] = self.quantize(g.ndata["a_t"])
@@ -808,14 +809,26 @@ class SFMModule(LightningModule):
                 dict_ret = self.net(g, t, node_batch_idx, upper_edge_mask, apply_softmax=True, remove_com=True)
                 x_1_weight = dt / (1.0 - t)
                 g.ndata["x_t"] = g.ndata["x_t"] * (1.0 - x_1_weight)[node_batch_idx, None] + dict_ret["x"] * x_1_weight[node_batch_idx, None]
+
                 # things must be on sphere, hence squares
-                g.ndata["c_t"] = self.manifold.geodesic_interpolant(g.ndata["c_t"], dict_ret["c"].square(), t[node_batch_idx])
-                g.ndata["a_t"] = self.manifold.geodesic_interpolant(g.ndata["a_t"], dict_ret["a"].square(), t[node_batch_idx])
-                e_t = self.manifold.geodesic_interpolant(g.edata["e_t"][upper_edge_mask], dict_ret["e"].square(), t[edge_batch_idx][upper_edge_mask])
+                mult = (1.0 / (1.0 - t))[node_batch_idx].unsqueeze(-1)
+                g.ndata["c_t"] = self.manifold.exp_map(
+                    g.ndata["c_t"],
+                    mult * self.manifold.log_map(g.ndata["c_t"], dict_ret["c"].square())
+                )
+                g.ndata["a_t"] = self.manifold.exp_map(
+                    g.ndata["a_t"], 
+                    mult * self.manifold.log_map(g.ndata["a_t"], dict_ret["a"].square())
+                )
+                e_t = self.manifold.exp_map(
+                    g.edata["e_t"][upper_edge_mask],
+                    (1.0 / (1.0 - t))[edge_batch_idx][upper_edge_mask].unsqueeze(-1) * self.manifold.log_map(g.edata["e_t"][upper_edge_mask], dict_ret["e"].square())
+                )
                 e_t_set = torch.zeros_like(g.edata["e_t"])
                 e_t_set[upper_edge_mask] = e_t
                 e_t_set[~upper_edge_mask] = e_t
                 g.edata["e_t"] = e_t_set
+                t += dt
             g.ndata["x_1"] = g.ndata["x_t"]
             g.ndata["a_1"] = g.ndata["a_t"]
             g.ndata["c_1"] = g.ndata["c_t"]
