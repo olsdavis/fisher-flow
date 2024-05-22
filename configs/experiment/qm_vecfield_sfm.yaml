@@ -34,6 +34,7 @@ model:
   eval_n_mols: 64
   eval_unconditional_mols_every: 5
   fast_matmul: true
+  predict_mol: true
 
 logger:
   wandb:

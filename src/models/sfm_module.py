@@ -32,6 +32,7 @@ from src.models.net import TangentWrapper
 from src.data.components.promoter_eval import SeiEval
 from src.data.components.fbd import FBD
 from src.data.components.qm_utils import *
+from src.data.components.molecule_prior import align_prior
 from src.data.components.molecule_builder import SampledMolecule
 from src.data.components.sample_analyzer import SampleAnalyzer
 from src.data import RetroBridgeDatasetInfos, PlaceHolder, retrobridge_utils
@@ -140,6 +141,7 @@ class SFMModule(LightningModule):
         eval_unconditional_mols: bool = False,
         eval_n_mols: int = 0,
         eval_unconditional_mols_every: int = 10,
+        predict_mol: bool = False,  # instead of tangent vector
         # misc
         fast_matmul: bool = False,
     ):
@@ -193,6 +195,7 @@ class SFMModule(LightningModule):
         self.eval_unconditional_mols = eval_unconditional_mols
         self.eval_n_mols = eval_n_mols
         self.eval_unconditional_mols_every = eval_unconditional_mols_every
+        self.predict_mol = predict_mol
         if self.eval_unconditional_mols:
             self.n_atoms_dist = build_n_atoms_dist("./data/qm9/train_data_n_atoms_histogram.pt")
             self.mol_features = ["a", "x", "e", "c"]
@@ -665,48 +668,89 @@ class SFMModule(LightningModule):
         """
         Perform a single step on a QM9 graph.
         """
-        t = torch.rand(graph.batch_size, 1, device=graph.device)
-        node_batch_idx = get_node_batch_idxs(graph)
+        node_batch_idx, edge_batch_idx = get_batch_idxs(graph)
         edge_upper_index = get_upper_edge_mask(graph)
         # random positions
-        e_1 = self.densify_dgl_edges(graph, graph.edata["e_1_true"], node_batch_idx)
-        x_1, x_mask = to_dense_batch(graph.ndata["x_1_true"], node_batch_idx)
-        a_1, a_mask = to_dense_batch(graph.ndata["a_1_true"], node_batch_idx)
-        c_1, c_mask = to_dense_batch(graph.ndata["c_1_true"], node_batch_idx)
-        edges_flat = e_1.reshape(e_1.size(0), -1, e_1.size(-1))
-        x_0 = torch.randn_like(x_1)  # positions!
-        e_0 = self.manifold.uniform_prior(*edges_flat.shape).to(graph.device)
-        a_0 = self.manifold.uniform_prior(*a_1.shape).to(graph.device)
-        c_0 = self.manifold.uniform_prior(*c_1.shape).to(graph.device)
+        # compute rest
+        if not self.predict_mol:
+            t = torch.rand(graph.batch_size, 1, device=graph.device)
+            # prepare
+            e_1 = self.densify_dgl_edges(graph, graph.edata["e_1_true"], node_batch_idx)
+            x_1, x_mask = to_dense_batch(graph.ndata["x_1_true"], node_batch_idx)
+            a_1, a_mask = to_dense_batch(graph.ndata["a_1_true"], node_batch_idx)
+            x_0 = torch.randn_like(x_1)  # positions!
+            x_0 = align_prior(x_0, x_1, permutation=True, rigid_body=True)  # like OT
+            a_0 = self.manifold.uniform_prior(*a_1.shape).to(graph.device)
+            c_0 = self.manifold.uniform_prior(*c_1.shape).to(graph.device)
+            c_1, c_mask = to_dense_batch(graph.ndata["c_1_true"], node_batch_idx)
+            edges_flat = e_1.reshape(e_1.size(0), -1, e_1.size(-1))
+            e_0 = self.manifold.uniform_prior(*edges_flat.shape).to(graph.device)
 
-        # sample points
-        # to_dense_adj(graph.adj().to_dense(), node_batch_idx, graph.edata["e_1_true"])
-        # need to compute target wrt Euclidean flow matching
-        # x_t, x_target = ...
-        a_t, a_target = self.compute_target(a_0, a_1, t)
-        c_t, c_target = self.compute_target(c_0, c_1, t)
-        e_t, e_target = self.compute_target(e_0, edges_flat, t)
-        e_t = e_t.reshape_as(e_1)
-        e_1_mask = torch.isclose(e_1.sum(dim=-1), torch.tensor(1.0))
-        e_t = e_t[e_1_mask]
-        e_t[~edge_upper_index] = e_t[edge_upper_index]
+            # sample points
+            # to_dense_adj(graph.adj().to_dense(), node_batch_idx, graph.edata["e_1_true"])
+            # need to compute target wrt Euclidean flow matching
+            # x_t, x_target = ...
+            a_t, a_target = self.compute_target(a_0, a_1, t)
+            c_t, c_target = self.compute_target(c_0, c_1, t)
+            e_t, e_target = self.compute_target(e_0, edges_flat, t)
+            e_t = e_t.reshape_as(e_1)
+            e_1_mask = torch.isclose(e_1.sum(dim=-1), torch.tensor(1.0))
+            e_t = e_t[e_1_mask]
+            e_t[~edge_upper_index] = e_t[edge_upper_index]
 
-        graph.ndata["a_t"] = a_t[a_mask]
-        graph.ndata["c_t"] = c_t[c_mask]
-        graph.edata["e_t"] = e_t
-        graph.ndata["x_t"] = (x_0 * t.unsqueeze(-1) + x_1 * (1 - t.unsqueeze(-1)))[x_mask]
-        ret_dict = self.net(graph, t.squeeze(), node_batch_idx, edge_upper_index)
-        a_pred = self.manifold.make_tangent(a_t[a_mask], ret_dict["a"])
-        c_pred = self.manifold.make_tangent(c_t[c_mask], ret_dict["c"])
-        e_pred = self.manifold.make_tangent(e_t[edge_upper_index], ret_dict["e"])
-        x_pred = ret_dict["x"]  # euclid, always tangent
-        
-        # losses
-        a_loss = (a_pred - a_target[a_mask]).square().sum()
-        x_loss = (x_pred - (x_1 - x_0)[x_mask]).square().sum()
-        c_loss = (c_pred - c_target[c_mask]).square().sum()
-        e_loss = (e_pred - e_target[e_1_mask.reshape(e_1_mask.size(0), -1)][edge_upper_index]).square().sum()
-        return (a_loss + x_loss + c_loss + e_loss) / graph.batch_size, a_loss, x_loss, c_loss, e_loss
+            graph.ndata["a_t"] = a_t[a_mask]
+            graph.ndata["c_t"] = c_t[c_mask]
+            graph.edata["e_t"] = e_t
+            graph.ndata["x_t"] = (x_0 * t.unsqueeze(-1) + x_1 * (1 - t.unsqueeze(-1)))[x_mask]
+            ret_dict = self.net(graph, t.squeeze(), node_batch_idx, edge_upper_index)
+            a_pred = self.manifold.make_tangent(a_t[a_mask], ret_dict["a"])
+            c_pred = self.manifold.make_tangent(c_t[c_mask], ret_dict["c"])
+            e_pred = self.manifold.make_tangent(e_t[edge_upper_index], ret_dict["e"])
+            x_pred = ret_dict["x"]  # euclid, always tangent
+
+            # losses
+            a_loss = (a_pred - a_target[a_mask]).square().sum()
+            x_loss = (x_pred - (x_1 - x_0)[x_mask]).square().sum()
+            c_loss = (c_pred - c_target[c_mask]).square().sum()
+            e_loss = (e_pred - e_target[e_1_mask.reshape(e_1_mask.size(0), -1)][edge_upper_index]).square().sum()
+            return (a_loss + x_loss + c_loss + e_loss) / graph.batch_size, a_loss, x_loss, c_loss, e_loss
+        else:
+            # predict molecule directly!
+            t = torch.rand(graph.batch_size, 1, device=graph.device)
+            # easier here
+            n_nodes = graph.num_nodes()
+            n_edges = graph.num_edges()
+            graph.ndata["x_0"] = torch.randn_like(graph.ndata["x_1_true"])
+            graph.ndata["a_0"] = self.manifold.uniform_prior(n_nodes, 1, graph.ndata["a_1_true"].size(-1)).to(graph.device).squeeze()
+            graph.ndata["c_0"] = self.manifold.uniform_prior(n_nodes, 1, graph.ndata["c_1_true"].size(-1)).to(graph.device).squeeze()
+            graph.edata["e_0"] = self.manifold.uniform_prior(n_edges, 1, graph.edata["e_1_true"].size(-1)).to(graph.device).squeeze()
+            graph.edata["e_0"][~edge_upper_index] = graph.edata["e_0"][edge_upper_index]
+
+            # linear bugger
+            graph.ndata["x_t"] = (
+                t[node_batch_idx] * graph.ndata["x_0"] 
+                + (1 - t)[node_batch_idx] * graph.ndata["x_1_true"]
+            ).squeeze()
+            # rest is on manifold
+            graph.ndata["a_t"] = self.manifold.geodesic_interpolant(
+                graph.ndata["a_0"].unsqueeze(1), graph.ndata["a_1_true"].unsqueeze(1), t[node_batch_idx]
+            ).squeeze()
+            graph.ndata["c_t"] = self.manifold.geodesic_interpolant(
+                graph.ndata["c_0"].unsqueeze(1), graph.ndata["c_1_true"].unsqueeze(1), t[node_batch_idx]
+            ).squeeze()
+            graph.edata["e_t"] = self.manifold.geodesic_interpolant(
+                graph.edata["e_0"].unsqueeze(1), graph.edata["e_1_true"].unsqueeze(1), t[edge_batch_idx]
+            ).squeeze()
+
+            # remove softmax, because cross entropy loss
+            pred_dict = self.net(graph, t.squeeze(), node_batch_idx, edge_upper_index, apply_softmax=False, remove_com=True)
+
+            # loss is from the paper
+            x_loss = 3.0 * (pred_dict["x"] - graph.ndata["x_1_true"]).square().sum() / graph.batch_size
+            a_loss = 0.4 * F.cross_entropy(pred_dict["a"], graph.ndata["a_1_true"], reduction="sum") / graph.batch_size
+            c_loss = 1.0 * F.cross_entropy(pred_dict["c"], graph.ndata["c_1_true"], reduction="sum") / graph.batch_size
+            e_loss = 2.0 * F.cross_entropy(pred_dict["e"], graph.edata["e_1_true"][edge_upper_index], reduction="sum") / graph.batch_size
+            return x_loss + a_loss + c_loss + e_loss, a_loss, x_loss, c_loss, e_loss
 
     def quantize(self, tensor: torch.Tensor) -> torch.Tensor:
         """
@@ -736,27 +780,47 @@ class SFMModule(LightningModule):
         g = dgl.batch(g)
 
         upper_edge_mask = get_upper_edge_mask(g)
-        node_batch_idx = get_node_batch_idxs(g)
+        node_batch_idx, edge_batch_idx = get_batch_idxs(g)
 
         # inference
         dt = torch.tensor(1.0 / self.inference_steps, device=self.device)
         t = torch.zeros(batch_size, device=self.device)
-        for _ in range(self.inference_steps):
-            dict_ret = self.net(g, t, node_batch_idx, upper_edge_mask)
-            a = self.manifold.make_tangent(g.ndata["a_t"], dict_ret["a"])
-            c = self.manifold.make_tangent(g.ndata["c_t"], dict_ret["c"])
-            e = self.manifold.make_tangent(g.edata["e_t"][upper_edge_mask], dict_ret["e"])
-            # update
-            g.ndata["x_t"] = g.ndata["x_t"] + dict_ret["x"] * dt
-            g.ndata["a_t"] = self.manifold.exp_map(g.ndata["a_t"], a * dt)
-            g.ndata["c_t"] = self.manifold.exp_map(g.ndata["c_t"], c * dt)
-            g.edata["e_t"][upper_edge_mask] = self.manifold.exp_map(g.edata["e_t"][upper_edge_mask], e * dt)
-            g.edata["e_t"][~upper_edge_mask] = self.manifold.exp_map(g.edata["e_t"][~upper_edge_mask], e * dt)
+        if not self.predict_mol:
+            for _ in range(self.inference_steps):
+                dict_ret = self.net(g, t, node_batch_idx, upper_edge_mask)
+                a = self.manifold.make_tangent(g.ndata["a_t"], dict_ret["a"])
+                c = self.manifold.make_tangent(g.ndata["c_t"], dict_ret["c"])
+                e = self.manifold.make_tangent(g.edata["e_t"][upper_edge_mask], dict_ret["e"])
+                # update
+                g.ndata["x_t"] = g.ndata["x_t"] + dict_ret["x"] * dt
+                g.ndata["a_t"] = self.manifold.exp_map(g.ndata["a_t"], a * dt)
+                g.ndata["c_t"] = self.manifold.exp_map(g.ndata["c_t"], c * dt)
+                g.edata["e_t"][upper_edge_mask] = self.manifold.exp_map(g.edata["e_t"][upper_edge_mask], e * dt)
+                g.edata["e_t"][~upper_edge_mask] = self.manifold.exp_map(g.edata["e_t"][~upper_edge_mask], e * dt)
 
-        g.ndata["x_1"] = g.ndata["x_t"]
-        g.ndata["a_1"] = self.quantize(g.ndata["a_t"])
-        g.ndata["c_1"] = self.quantize(g.ndata["c_t"])
-        g.edata["e_1"] = self.quantize(g.edata["e_t"])
+            g.ndata["x_1"] = g.ndata["x_t"]
+            g.ndata["a_1"] = self.quantize(g.ndata["a_t"])
+            g.ndata["c_1"] = self.quantize(g.ndata["c_t"])
+            g.edata["e_1"] = self.quantize(g.edata["e_t"])
+        else:
+            # predict mol, need integration
+            for _ in range(self.inference_steps):
+                dict_ret = self.net(g, t, node_batch_idx, upper_edge_mask, apply_softmax=True, remove_com=True)
+                x_1_weight = dt / (1.0 - t)
+                g.ndata["x_t"] = g.ndata["x_t"] * (1.0 - x_1_weight)[node_batch_idx, None] + dict_ret["x"] * x_1_weight[node_batch_idx, None]
+                # things must be on sphere, hence squares
+                g.ndata["c_t"] = self.manifold.geodesic_interpolant(g.ndata["c_t"], dict_ret["c"].square(), t[node_batch_idx])
+                g.ndata["a_t"] = self.manifold.geodesic_interpolant(g.ndata["a_t"], dict_ret["a"].square(), t[node_batch_idx])
+                e_t = self.manifold.geodesic_interpolant(g.edata["e_t"][upper_edge_mask], dict_ret["e"].square(), t[edge_batch_idx][upper_edge_mask])
+                e_t_set = torch.zeros_like(g.edata["e_t"])
+                e_t_set[upper_edge_mask] = e_t
+                e_t_set[~upper_edge_mask] = e_t
+                g.edata["e_t"] = e_t_set
+            g.ndata["x_1"] = g.ndata["x_t"]
+            g.ndata["a_1"] = g.ndata["a_t"]
+            g.ndata["c_1"] = g.ndata["c_t"]
+            g.edata["e_1"] = g.edata["e_t"]
+
         g.edata["ue_mask"] = upper_edge_mask
         g = g.to("cpu")
 
