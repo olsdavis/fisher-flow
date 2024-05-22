@@ -10,8 +10,12 @@ from lightning.pytorch.utilities import grad_norm
 from torchmetrics import MeanMetric, MinMetric, MaxMetric
 from torch_ema import ExponentialMovingAverage
 from torch_geometric.data import Batch
+from torch_geometric.utils import (
+    to_dense_batch, to_dense_adj, from_dgl
+)
 from tqdm import tqdm
 import schedulefree
+from dgl import DGLGraph
 
 
 from src.sfm import (
@@ -27,6 +31,10 @@ from src.sfm import (
 from src.models.net import TangentWrapper
 from src.data.components.promoter_eval import SeiEval
 from src.data.components.fbd import FBD
+from src.data.components.qm_utils import *
+from src.data.components.molecule_prior import align_prior
+from src.data.components.molecule_builder import SampledMolecule
+from src.data.components.sample_analyzer import SampleAnalyzer
 from src.data import RetroBridgeDatasetInfos, PlaceHolder, retrobridge_utils
 from src.experiments.retrosynthesis import (
     DummyExtraFeatures,
@@ -70,6 +78,14 @@ def perturbed_geodesic(manifold, start_point, end_point):
     return path_perturbed
 
 
+def build_n_atoms_dist(n_atoms_hist_file: str):
+    """Builds the distribution of the number of atoms in a ligand."""
+    n_atoms, n_atom_counts = torch.load(n_atoms_hist_file)
+    n_atoms_prob = n_atom_counts / n_atom_counts.sum()
+    n_atoms_dist = torch.distributions.Categorical(probs=n_atoms_prob)
+    return n_atoms_dist
+
+
 class SFMModule(LightningModule):
     """
     Module for the Toy DFM dataset.
@@ -93,6 +109,7 @@ class SFMModule(LightningModule):
         closed_form_drv: bool = False,
         debug_grads: bool = False,
         inference_steps: int = 100,
+        tangent_wrapper: bool = True,
         datamodule: Any = None,  # in retrobridge
         # enhancer
         eval_fbd: bool = False,
@@ -120,6 +137,11 @@ class SFMModule(LightningModule):
         gpt_nll_eval: bool = False,
         eval_gpt_nll_every: int = 10,
         gpt_nll_samples: int = 512,
+        # qm
+        eval_unconditional_mols: bool = False,
+        eval_n_mols: int = 0,
+        eval_unconditional_mols_every: int = 10,
+        predict_mol: bool = False,  # instead of tangent vector
         # misc
         fast_matmul: bool = False,
     ):
@@ -132,7 +154,7 @@ class SFMModule(LightningModule):
 
         # this line allows to access init params with 'self.hparams' attribute
         # also ensures init params will be stored in ckpt
-        self.save_hyperparameters(ignore=["net", "fbd"], logger=False)
+        self.save_hyperparameters(ignore=["net", "fbd", "n_atoms_dist"], logger=False)
         # if basically zero or zero
         self.smoothing = label_smoothing if label_smoothing and label_smoothing > 1e-6 else None
         self.tangent_euler = tangent_euler
@@ -140,7 +162,7 @@ class SFMModule(LightningModule):
         self.promoter_eval = promoter_eval
         self.manifold = manifold_from_name(manifold)
         # don't wrap for retrobridge!
-        self.net = TangentWrapper(self.manifold, net).to(self.device) if not datamodule else net
+        self.net = net if not tangent_wrapper or datamodule is not None else TangentWrapper(self.manifold, net)
         if ema:
             self.ema = ExponentialMovingAverage(self.net.parameters(), decay=ema_decay).to(self.device)
         else:
@@ -169,7 +191,17 @@ class SFMModule(LightningModule):
         self.eval_gpt_nll = gpt_nll_eval
         self.gpt_nll_every = eval_gpt_nll_every
         self.gpt_nll_samples = gpt_nll_samples
-
+        # QM
+        self.eval_unconditional_mols = eval_unconditional_mols
+        self.eval_n_mols = eval_n_mols
+        self.eval_unconditional_mols_every = eval_unconditional_mols_every
+        self.predict_mol = predict_mol
+        if self.eval_unconditional_mols:
+            self.n_atoms_dist = build_n_atoms_dist("./data/qm9/train_data_n_atoms_histogram.pt")
+            self.mol_features = ["a", "x", "e", "c"]
+            for ft in self.mol_features:
+                for tp in ["train", "val", "test"]:
+                    setattr(self, f"{tp}_{ft}_loss", MeanMetric())
         # retrobridge:
         self.retrobridge = datamodule is not None
         self.retrobridge_eval_every = retrobridge_eval_every
@@ -248,7 +280,7 @@ class SFMModule(LightningModule):
             if isinstance(optim, schedulefree.AdamWScheduleFree):
                 optim.eval()
 
-    def on_train_epoch_start(self):
+    def on_after_backward(self):
         for optim in self.trainer.optimizers:
             # schedule free needs to set to train
             if isinstance(optim, schedulefree.AdamWScheduleFree):
@@ -464,9 +496,9 @@ class SFMModule(LightningModule):
         else:
             mask = torch.isclose(x_0.square().sum(dim=-1), torch.tensor(1.0))
             x_t = torch.zeros_like(x_0)
-            x_t[mask] = self.manifold.geodesic_interpolant(x_0, x_1, t)[mask]
+            x_t[mask] = self.manifold.geodesic_interpolant(x_0, x_1, time)[mask]
             x_t[mask] = metropolis_sphere_perturbation(
-                x_t, default_perturbation_schedule(t)
+                x_t, default_perturbation_schedule(time)
             )[mask]
             target = torch.zeros_like(x_t)
             target[mask] = self.manifold.log_map(x_0, x_1)[mask]
@@ -501,15 +533,6 @@ class SFMModule(LightningModule):
             batch_groups = []
             # batch_scores = []
             for sample_idx in range(self.samples_per_input):
-                """molecule_list, true_molecule_list, products_list, scores, _, _ = self.sample_batch(
-                    data=data,
-                    batch_id=ident,
-                    batch_size=to_generate,
-                    save_final=to_save,
-                    keep_chain=chains_save,
-                    number_chain_steps_to_save=self.number_chain_steps_to_save,
-                    sample_idx=sample_idx,
-                )"""
                 mol_sample = self.sample_molecule(data)
                 molecule_list = retrobridge_utils.create_pred_reactant_molecules(mol_sample.X, mol_sample.E, data.batch, to_generate)
                 samples.extend(molecule_list)
@@ -636,6 +659,191 @@ class SFMModule(LightningModule):
             rets += ["".join([self.trainer.datamodule.itos[c.item()] for c in sample])]
         return rets
 
+    def densify_dgl_edges(self, graph: DGLGraph, edges_attr: torch.Tensor, node_batch_idx: torch.Tensor) -> torch.Tensor:
+        graph.edata["edge_attr"] = edges_attr
+        tg = from_dgl(graph)
+        return to_dense_adj(tg.edge_index, node_batch_idx, tg.edge_attr)
+
+    def qm_step(self, graph: DGLGraph) -> torch.Tensor:
+        """
+        Perform a single step on a QM9 graph.
+        """
+        node_batch_idx, edge_batch_idx = get_batch_idxs(graph)
+        edge_upper_index = get_upper_edge_mask(graph)
+        # random positions
+        # compute rest
+        if not self.predict_mol:
+            t = torch.rand(graph.batch_size, 1, device=graph.device)
+            # prepare
+            e_1 = self.densify_dgl_edges(graph, graph.edata["e_1_true"], node_batch_idx)
+            x_1, x_mask = to_dense_batch(graph.ndata["x_1_true"], node_batch_idx)
+            a_1, a_mask = to_dense_batch(graph.ndata["a_1_true"], node_batch_idx)
+            x_0 = torch.randn_like(x_1)  # positions!
+            x_0 = align_prior(x_0, x_1, permutation=True, rigid_body=True)  # like OT
+            a_0 = self.manifold.uniform_prior(*a_1.shape).to(graph.device)
+            c_0 = self.manifold.uniform_prior(*c_1.shape).to(graph.device)
+            c_1, c_mask = to_dense_batch(graph.ndata["c_1_true"], node_batch_idx)
+            edges_flat = e_1.reshape(e_1.size(0), -1, e_1.size(-1))
+            e_0 = self.manifold.uniform_prior(*edges_flat.shape).to(graph.device)
+
+            # sample points
+            # to_dense_adj(graph.adj().to_dense(), node_batch_idx, graph.edata["e_1_true"])
+            # need to compute target wrt Euclidean flow matching
+            # x_t, x_target = ...
+            a_t, a_target = self.compute_target(a_0, a_1, t)
+            c_t, c_target = self.compute_target(c_0, c_1, t)
+            e_t, e_target = self.compute_target(e_0, edges_flat, t)
+            e_t = e_t.reshape_as(e_1)
+            e_1_mask = torch.isclose(e_1.sum(dim=-1), torch.tensor(1.0))
+            e_t = e_t[e_1_mask]
+            e_t[~edge_upper_index] = e_t[edge_upper_index]
+
+            graph.ndata["a_t"] = a_t[a_mask]
+            graph.ndata["c_t"] = c_t[c_mask]
+            graph.edata["e_t"] = e_t
+            graph.ndata["x_t"] = (x_0 * t.unsqueeze(-1) + x_1 * (1 - t.unsqueeze(-1)))[x_mask]
+            ret_dict = self.net(graph, t.squeeze(), node_batch_idx, edge_upper_index)
+            a_pred = self.manifold.make_tangent(a_t[a_mask], ret_dict["a"])
+            c_pred = self.manifold.make_tangent(c_t[c_mask], ret_dict["c"])
+            e_pred = self.manifold.make_tangent(e_t[edge_upper_index], ret_dict["e"])
+            x_pred = ret_dict["x"]  # euclid, always tangent
+
+            # losses
+            a_loss = (a_pred - a_target[a_mask]).square().sum()
+            x_loss = (x_pred - (x_1 - x_0)[x_mask]).square().sum()
+            c_loss = (c_pred - c_target[c_mask]).square().sum()
+            e_loss = (e_pred - e_target[e_1_mask.reshape(e_1_mask.size(0), -1)][edge_upper_index]).square().sum()
+            return (a_loss + x_loss + c_loss + e_loss) / graph.batch_size, a_loss, x_loss, c_loss, e_loss
+        else:
+            # predict molecule directly!
+            t = torch.rand(graph.batch_size, 1, device=graph.device)
+            # easier here
+            n_nodes = graph.num_nodes()
+            n_edges = graph.num_edges()
+            graph.ndata["x_0"] = torch.randn_like(graph.ndata["x_1_true"])
+            graph.ndata["a_0"] = self.manifold.uniform_prior(n_nodes, 1, graph.ndata["a_1_true"].size(-1)).to(graph.device).squeeze()
+            graph.ndata["c_0"] = self.manifold.uniform_prior(n_nodes, 1, graph.ndata["c_1_true"].size(-1)).to(graph.device).squeeze()
+            graph.edata["e_0"] = self.manifold.uniform_prior(n_edges, 1, graph.edata["e_1_true"].size(-1)).to(graph.device).squeeze()
+            graph.edata["e_0"][~edge_upper_index] = graph.edata["e_0"][edge_upper_index]
+
+            # linear bugger
+            graph.ndata["x_t"] = (
+                t[node_batch_idx] * graph.ndata["x_0"] 
+                + (1 - t)[node_batch_idx] * graph.ndata["x_1_true"]
+            ).squeeze()
+            # rest is on manifold
+            graph.ndata["a_t"] = self.manifold.geodesic_interpolant(
+                graph.ndata["a_0"].unsqueeze(1), graph.ndata["a_1_true"].unsqueeze(1), t[node_batch_idx]
+            ).squeeze()
+            graph.ndata["c_t"] = self.manifold.geodesic_interpolant(
+                graph.ndata["c_0"].unsqueeze(1), graph.ndata["c_1_true"].unsqueeze(1), t[node_batch_idx]
+            ).squeeze()
+            graph.edata["e_t"] = self.manifold.geodesic_interpolant(
+                graph.edata["e_0"].unsqueeze(1), graph.edata["e_1_true"].unsqueeze(1), t[edge_batch_idx]
+            ).squeeze()
+
+            # remove softmax, because cross entropy loss
+            pred_dict = self.net(graph, t.squeeze(), node_batch_idx, edge_upper_index, apply_softmax=False, remove_com=True)
+
+            # loss is from the paper
+            x_loss = (pred_dict["x"] - graph.ndata["x_1_true"]).square().sum() / graph.batch_size
+            a_loss = F.cross_entropy(pred_dict["a"], graph.ndata["a_1_true"], reduction="sum") / graph.batch_size
+            c_loss = F.cross_entropy(pred_dict["c"], graph.ndata["c_1_true"], reduction="sum") / graph.batch_size
+            e_loss = F.cross_entropy(pred_dict["e"], graph.edata["e_1_true"][edge_upper_index], reduction="sum") / graph.batch_size
+            return x_loss + a_loss + c_loss + e_loss, a_loss, x_loss, c_loss, e_loss
+
+    def quantize(self, tensor: torch.Tensor) -> torch.Tensor:
+        """
+        Quantizes to one-hot encoding.
+        """
+        return F.one_hot(tensor.argmax(dim=-1), num_classes=tensor.size(-1))
+
+    @torch.no_grad()
+    def sample_unconditional_molecule(self, n_atoms: torch.Tensor) -> list[SampledMolecule]:
+        batch_size = n_atoms.size(0)
+        # get the edge indicies for each unique number of atoms
+        edge_idxs_dict = {}
+        for n_atoms_i in torch.unique(n_atoms):
+            edge_idxs_dict[int(n_atoms_i)] = build_edge_idxs(n_atoms_i)
+
+        # construct a graph for each molecule
+        g = []
+        for n_atoms_i in n_atoms:
+            edge_idxs = edge_idxs_dict[int(n_atoms_i)]
+            g_i = dgl.graph((edge_idxs[0], edge_idxs[1]), num_nodes=n_atoms_i, device=self.device)
+            g_i.ndata["c_t"] = self.manifold.uniform_prior(n_atoms_i, 1, 6).to(self.device).squeeze()
+            g_i.ndata["x_t"] = torch.randn(n_atoms_i, 1, 3).to(self.device).squeeze()
+            g_i.ndata["a_t"] = self.manifold.uniform_prior(n_atoms_i, 1, 5).to(self.device).squeeze()
+            g_i.edata["e_t"] = self.manifold.uniform_prior(len(edge_idxs[0]), 1, 5).squeeze().to(self.device)
+            g.append(g_i)
+
+        g = dgl.batch(g)
+
+        upper_edge_mask = get_upper_edge_mask(g)
+        node_batch_idx, edge_batch_idx = get_batch_idxs(g)
+
+        # inference
+        dt = torch.tensor(1.0 / self.inference_steps, device=self.device)
+        t = torch.zeros(batch_size, device=self.device)
+        if not self.predict_mol:
+            for _ in range(self.inference_steps):
+                dict_ret = self.net(g, t, node_batch_idx, upper_edge_mask)
+                a = self.manifold.make_tangent(g.ndata["a_t"], dict_ret["a"])
+                c = self.manifold.make_tangent(g.ndata["c_t"], dict_ret["c"])
+                e = self.manifold.make_tangent(g.edata["e_t"][upper_edge_mask], dict_ret["e"])
+                # update
+                g.ndata["x_t"] = g.ndata["x_t"] + dict_ret["x"] * dt
+                g.ndata["a_t"] = self.manifold.exp_map(g.ndata["a_t"], a * dt)
+                g.ndata["c_t"] = self.manifold.exp_map(g.ndata["c_t"], c * dt)
+                g.edata["e_t"][upper_edge_mask] = self.manifold.exp_map(g.edata["e_t"][upper_edge_mask], e * dt)
+                g.edata["e_t"][~upper_edge_mask] = self.manifold.exp_map(g.edata["e_t"][~upper_edge_mask], e * dt)
+                t += dt
+
+            g.ndata["x_1"] = g.ndata["x_t"]
+            g.ndata["a_1"] = self.quantize(g.ndata["a_t"])
+            g.ndata["c_1"] = self.quantize(g.ndata["c_t"])
+            g.edata["e_1"] = self.quantize(g.edata["e_t"])
+        else:
+            # predict mol, need integration
+            for _ in range(self.inference_steps):
+                dict_ret = self.net(g, t, node_batch_idx, upper_edge_mask, apply_softmax=True, remove_com=True)
+                x_1_weight = dt / (1.0 - t)
+                g.ndata["x_t"] = g.ndata["x_t"] * (1.0 - x_1_weight)[node_batch_idx, None] + dict_ret["x"] * x_1_weight[node_batch_idx, None]
+
+                # things must be on sphere, hence squares
+                mult = x_1_weight[node_batch_idx, None]
+                g.ndata["c_t"] = self.manifold.exp_map(
+                    g.ndata["c_t"],
+                    mult * self.manifold.log_map(g.ndata["c_t"], dict_ret["c"].square())
+                )
+                g.ndata["a_t"] = self.manifold.exp_map(
+                    g.ndata["a_t"], 
+                    mult * self.manifold.log_map(g.ndata["a_t"], dict_ret["a"].square())
+                )
+                e_t = self.manifold.exp_map(
+                    g.edata["e_t"][upper_edge_mask],
+                    (1.0 / (1.0 - t))[edge_batch_idx][upper_edge_mask].unsqueeze(-1) * self.manifold.log_map(g.edata["e_t"][upper_edge_mask], dict_ret["e"].square())
+                )
+                e_t_set = torch.zeros_like(g.edata["e_t"])
+                e_t_set[upper_edge_mask] = e_t
+                e_t_set[~upper_edge_mask] = e_t
+                g.edata["e_t"] = e_t_set
+                t += dt
+            g.ndata["x_1"] = g.ndata["x_t"]
+            g.ndata["a_1"] = g.ndata["a_t"]
+            g.ndata["c_1"] = g.ndata["c_t"]
+            g.edata["e_1"] = g.edata["e_t"]
+
+        g.edata["ue_mask"] = upper_edge_mask
+        g = g.to("cpu")
+
+        molecules = []
+        for _, g_i in enumerate(dgl.unbatch(g)):
+            args = [g_i, ['C', 'H', 'N', 'O', 'F',]]
+            molecules.append(SampledMolecule(*args, exclude_charges=False))
+
+        return molecules
+
     def training_step(
         self, x_1: torch.Tensor | list[torch.Tensor] | Batch, batch_idx: int,
     ) -> torch.Tensor:
@@ -649,13 +857,21 @@ class SFMModule(LightningModule):
         if isinstance(x_1, list):
             x_1, signal = x_1
             # Only one of the two signal inputs is used (the first one)
-            if len(signal.shape) == 2:
+            if len(signal.shape) == 3:
                 signal = signal[:, :, 0].unsqueeze(-1)
                 loss = self.model_step(x_1, {"signal": signal})
             else:
                 loss = self.model_step(x_1, {"cls": signal})
         elif isinstance(x_1, Batch):
             loss = self.retrobridge_step(x_1)
+        elif isinstance(x_1, DGLGraph):
+            loss, a_loss, x_loss, c_loss, e_loss  = self.qm_step(x_1)
+            self.train_a_loss(a_loss)
+            self.train_x_loss(x_loss)
+            self.train_c_loss(c_loss)
+            self.train_e_loss(e_loss)
+            for ft in self.mol_features:
+                self.log(f"train/{ft}-loss", getattr(self, f"train_{ft}_loss"), on_step=False, on_epoch=True, prog_bar=True)
         else:
             loss = self.model_step(x_1)
 
@@ -679,13 +895,21 @@ class SFMModule(LightningModule):
         if isinstance(x_1, list):
             x_1, signal = x_1
             # Only one of the two signal inputs is used (the first one)
-            if len(signal.shape) == 2:
+            if len(signal.shape) == 3:
                 signal = signal[:, :, 0].unsqueeze(-1)
                 loss = self.model_step(x_1, {"signal": signal})
             else:
                 loss = self.model_step(x_1, {"cls": signal})
         elif isinstance(x_1, Batch):
             loss = self.retrobridge_step(x_1)
+        elif isinstance(x_1, DGLGraph):
+            loss, a_loss, x_loss, c_loss, e_loss  = self.qm_step(x_1)
+            self.val_a_loss(a_loss)
+            self.val_x_loss(x_loss)
+            self.val_c_loss(c_loss)
+            self.val_e_loss(e_loss)
+            for ft in self.mol_features:
+                self.log(f"val/{ft}-loss", getattr(self, f"val_{ft}_loss"), on_step=False, on_epoch=True, prog_bar=False)
         else:
             loss = self.model_step(x_1)
 
@@ -736,6 +960,12 @@ class SFMModule(LightningModule):
                 self.device,
             )
             self.log("val/gpt-nll", nll, on_step=False, on_epoch=True, prog_bar=True)
+        if self.eval_unconditional_mols and (self.trainer.current_epoch + 1) % self.eval_unconditional_mols_every == 0:
+            molecules = self.sample_unconditional_molecule(self.n_atoms_dist.sample((self.eval_n_mols // 4,)))
+            analyzer = SampleAnalyzer()
+            stats = analyzer.analyze(molecules)
+            for key, value in stats.items():
+                self.log(f"val/{key}", value, on_step=False, on_epoch=True, prog_bar=False)
 
     def test_step(self, x_1: torch.Tensor | list[torch.Tensor], batch_idx: int):
         """Perform a single test step on a batch of data from the test set.
@@ -747,15 +977,25 @@ class SFMModule(LightningModule):
         if isinstance(x_1, list):
             x_1, signal = x_1
             # Only one of the two signal inputs is used (the first one)
-            if len(signal.shape) == 2:
+            if len(signal.shape) == 3:
                 signal = signal[:, :, 0].unsqueeze(-1)
                 loss = self.model_step(x_1, {"signal": signal})
             else:
                 loss = self.model_step(x_1, {"cls": signal})
         elif isinstance(x_1, Batch):
             loss = self.retrobridge_step(x_1)
+        elif isinstance(x_1, DGLGraph):
+            loss, a_loss, x_loss, c_loss, e_loss  = self.qm_step(x_1)
+            self.test_a_loss(a_loss)
+            self.test_x_loss(x_loss)
+            self.test_c_loss(c_loss)
+            self.test_e_loss(e_loss)
+            for ft in self.mol_features:
+                self.log(f"test/{ft}-loss", getattr(self, f"test_{ft}_loss"), on_step=False, on_epoch=True, prog_bar=True)
         else:
             loss = self.model_step(x_1)
+            signal = None
+        print(self.produce_text_samples(64))
 
         # update and log metrics
         self.test_loss(loss)
@@ -778,7 +1018,7 @@ class SFMModule(LightningModule):
             ).mean()
             print(ppl)
             self.test_ppl(ppl)
-            self.log("test/ppl", self.test_ppl, on_step=False, on_epoch=True, prog_bar=True)
+            self.log("test/ppl", self.test_ppl, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
 
     def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
         if self.debug_grads:
@@ -804,6 +1044,12 @@ class SFMModule(LightningModule):
                 tangent=self.tangent_euler,
             )
             self.log("test/kl", kl, on_step=False, on_epoch=True, prog_bar=False)
+        if self.eval_unconditional_mols:
+            molecules = self.sample_unconditional_molecule(self.n_atoms_dist.sample((self.eval_n_mols,)))
+            analyzer = SampleAnalyzer()
+            stats = analyzer.analyze(molecules)
+            for key, value in stats.items():
+                self.log(f"test/{key}", value, on_step=False, on_epoch=True, prog_bar=False)
 
     def compute_sp_mse(
         self,

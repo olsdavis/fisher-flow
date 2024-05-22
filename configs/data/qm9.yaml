@@ -1,0 +1,8 @@
+# see trained_models.qm9_gaussian/config.yaml for an example in the original simplex flow repo: https://github.com/Dunni3/FlowMol/tree/main
+_target_: src.data.MoleculeDataModule
+dataset_config: xxx
+dm_prior_config: xxx
+batch_size: 384 # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
+num_workers: 32
+distributed: false
+max_num_edges: 4000

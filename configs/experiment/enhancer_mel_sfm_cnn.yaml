@@ -49,8 +49,8 @@ data:
 logger:
   wandb:
     tags: ${tags}
-    name: enhancer_mel_s${seed}
+    name: enhancer_mel_s${seed}_lr${model.optimizer.lr}
     group: "enhancer"
-    project: enhancer
+    project: enhancer-mel
   aim:
     experiment: "enhancer_mel"

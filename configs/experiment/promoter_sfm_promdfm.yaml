@@ -33,6 +33,7 @@ model:
   ot_method: None
   inference_steps: 100
   manifold: sphere
+  eval_ppl: true
 
 logger:
   wandb:

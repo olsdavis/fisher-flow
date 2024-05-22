@@ -27,17 +27,17 @@ model:
   net:
     block_size: ${data.k}
     vocab_size: ${data.dim}
-    n_layer: 8
-    n_head: 8
-    n_embd: 512
+    n_layer: 4
+    n_head: 4
+    n_embd: 256
   manifold: sphere
-  compile: true
+  compile: false
   eval_ppl: true
-  gpt_nll_eval: true
+  gpt_nll_eval: false
   eval_gpt_nll_every: 5
-  eval_ppl_every: 5
+  eval_ppl_every: 25
   gpt_nll_samples: 512
-  ot_method: None
+  ot_method: exact
 
 data:
   batch_size: 256

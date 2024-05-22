@@ -36,6 +36,7 @@ model:
   ot_method: exact
   fbd_every: 20
   eval_fbd: true
+  eval_ppl: false
   mel_or_dna: false  # DNA
   fbd_classifier_path: "workdir/clsDNAclean_cnn_1stack_2023-12-30_15-01-30/epoch=15-step=10480.ckpt"
   inference_steps: 100

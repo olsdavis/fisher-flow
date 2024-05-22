@@ -3,9 +3,9 @@
 #SBATCH --job-name=sfm 
 #SBATCH --output=slurm/slurm_%j.out
 #SBATCH --error=slurm/slurm_%j.err
-#SBATCH --time=23:00:00
+#SBATCH --time=01:00:00
 #SBATCH --mem=36000
 #SBATCH --qos=medium
-#SBATCH --gres=gpu:4
+#SBATCH --gres=gpu:2
 conda activate sfm
-srun -u python -m src.train experiment=text8_sfm_gpt trainer=ddp trainer.devices=4 logger=wandbsqueue
+python -m src.train experiment=qm_vecfield_sfm seed=$1 data.batch_size=384 trainer.max_epochs=500 trainer=ddp trainer.devices=2 logger=wandb
