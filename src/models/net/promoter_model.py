@@ -99,6 +99,9 @@ class PromoterModel(nn.Module):
         # Obtain the Gaussian random feature embedding for t
         # embed: [N, embed_dim]
         t = t.squeeze()
+        if t is not None and len(t.shape) == 0:
+            # odeint is on
+            t = t[None].expand(x.size(0))
         embed = self.act(self.embed(t / 2))
 
         x = torch.cat([x,signal], dim=-1)

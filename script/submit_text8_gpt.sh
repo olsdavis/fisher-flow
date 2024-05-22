@@ -6,6 +6,6 @@
 #SBATCH --time=23:00:00
 #SBATCH --mem=36000
 #SBATCH --qos=medium
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:4
 conda activate sfm
-srun -u python -m src.train experiment=text8_sfm_gpt trainer=ddp trainer.devices=2 logger=wandb
+srun -u python -m src.train experiment=text8_sfm_gpt trainer=ddp trainer.devices=4 logger=wandbsqueue

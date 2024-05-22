@@ -857,7 +857,7 @@ class SFMModule(LightningModule):
         if isinstance(x_1, list):
             x_1, signal = x_1
             # Only one of the two signal inputs is used (the first one)
-            if len(signal.shape) == 2:
+            if len(signal.shape) == 3:
                 signal = signal[:, :, 0].unsqueeze(-1)
                 loss = self.model_step(x_1, {"signal": signal})
             else:
@@ -895,7 +895,7 @@ class SFMModule(LightningModule):
         if isinstance(x_1, list):
             x_1, signal = x_1
             # Only one of the two signal inputs is used (the first one)
-            if len(signal.shape) == 2:
+            if len(signal.shape) == 3:
                 signal = signal[:, :, 0].unsqueeze(-1)
                 loss = self.model_step(x_1, {"signal": signal})
             else:
@@ -977,7 +977,7 @@ class SFMModule(LightningModule):
         if isinstance(x_1, list):
             x_1, signal = x_1
             # Only one of the two signal inputs is used (the first one)
-            if len(signal.shape) == 2:
+            if len(signal.shape) == 3:
                 signal = signal[:, :, 0].unsqueeze(-1)
                 loss = self.model_step(x_1, {"signal": signal})
             else:
@@ -994,6 +994,8 @@ class SFMModule(LightningModule):
                 self.log(f"test/{ft}-loss", getattr(self, f"test_{ft}_loss"), on_step=False, on_epoch=True, prog_bar=True)
         else:
             loss = self.model_step(x_1)
+            signal = None
+        print(self.produce_text_samples(64))
 
         # update and log metrics
         self.test_loss(loss)
@@ -1016,7 +1018,7 @@ class SFMModule(LightningModule):
             ).mean()
             print(ppl)
             self.test_ppl(ppl)
-            self.log("test/ppl", self.test_ppl, on_step=False, on_epoch=True, prog_bar=True)
+            self.log("test/ppl", self.test_ppl, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
 
     def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
         if self.debug_grads:
