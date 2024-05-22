@@ -38,5 +38,4 @@ rdkit==2023.9.5
 torch_geometric==2.5.3
 torchdiffeq==0.2.3
 schedulefree==1.2.5
-dgl==https://data.dgl.ai/wheels/torch-2.1/cu121/repo.html
 pydantic==2.7.1

@@ -995,7 +995,6 @@ class SFMModule(LightningModule):
         else:
             loss = self.model_step(x_1)
             signal = None
-        print(self.produce_text_samples(64))
 
         # update and log metrics
         self.test_loss(loss)

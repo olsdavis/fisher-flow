@@ -1,72 +1,31 @@
 # Simplex-Flows
-
-```py
-python -m src.train experiment=toy_dfm_sfm_cnn
+All our dependencies are listed in `environment.yaml`, for Conda, and `requirements.txt`, for `pip`. Please also separately install `DGL`:
+```bash
+pip install -r requirements.txt
+pip install dgl -f https://data.dgl.ai/wheels/torch-2.1/cu121/repo.html
 ```
+
+## Toy Experiment
+For the DFM toy experiment, the following command allows us to run our code:
+```bash
+python -m src.train experiment=toy_dfm_bmlp data.dim=100 trainer=gpu trainer.max_epochs=500
+```
+Of course, the dimension argument is varied, and the configuration files allow for changing manifolds (`"simplex"`, or `"sphere"`) and turn OT on/off (`"exact"` or `"None"`).
+
 ## Promoter and Enhancer DNA Experiment
+To download the datasets, it suffices to follow the steps of [Stark, et al](https://github.com/HannesStark/dirichlet-flow-matching/). For evaluating the FBD, it also needed to download their weights from their `workdir`. To run the promoter dataset experiment, the following command can be used:
 
-To run the dirichlet flow model on the promoter and enhancer dataset:
-
-```py
-python -m src.train experiment=promoter_dfm logger=wandb
+```bash
+python -m src.train experiment=promoter_sfm_promdfm trainer.max_epochs=200 trainer=gpu data.batch_size=128
 ```
 
-## RetroBridge: Products and Reactants Experiment
+As for the enhancer MEL2 experiment, the following command is available:
 
-Test whether the data has been loaded correctly:
-
-```py
-python -m src.data.retrobridge_datamodule
+```bash
+python -m src.train experiment=enhancer_mel_sfm_cnn trainer.max_epochs=800 trainer=gpu
 ```
 
-Test whether the model has been correctly coded up:
-
-```py
-python -m src.models.retrobridge_module
-```
-
-
-To run RetroBridge on this dataset:
-
-TODO:
-
-```py
-python -m src.train experiment=retrobridge_retrosyn logger=wandb
-```
-
-
-
-## Text8
-
-```py
-python -m src.train experiment=text8_sfm_bmlp logger=wandb
-```
-
-## QM9
-
-Download trained models
-
-```sh
-wget -r -np -nH --cut-dirs=2 --reject 'index.html*' https://bits.csb.pitt.edu/files/FlowMol/trained_models/
-```
-
-Download the QM9 dataset
-
-```sh
-mkdir data/qm9_raw
-cd data/qm9_raw
-wget https://deepchemdata.s3-us-west-1.amazonaws.com/datasets/molnet_publish/qm9.zip
-wget -O uncharacterized.txt https://ndownloader.figshare.com/files/3195404
-unzip qm9.zip
-```
-
-Process the dataset:
-```py
-python process_qm9.py --config=trained_models/qm9_gaussian/config.yaml
-```
-
-To test the DataModule:
-
-```py
-python -m src.data.qm9_datamodule
+and for the FlyBrain DNA one:
+```bash
+python -m src.train experiment=enhancer_fly_sfm_cnn trainer.max_epochs=800 trainer=gpu
 ```
