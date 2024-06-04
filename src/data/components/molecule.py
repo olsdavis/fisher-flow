@@ -2,7 +2,7 @@ import torch
 from pathlib import Path
 import dgl
 from torch.nn.functional import one_hot
-from .molecule_prior import coupled_node_prior, edge_prior
+from .molecule_prior import align_prior
 
 # create a function named collate that takes a list of samples from the dataset and combines them into a batch
 # this might not be necessary. I think we can pass the argument collate_fn=dgl.batch to the DataLoader
@@ -121,11 +121,11 @@ class MoleculeDataset(torch.utils.data.Dataset):
         # prior_node_feats = coupled_node_prior(dst_dict=dst_dict, prior_config=self.prior_config)
         # for feat in prior_node_feats:
         #     g.ndata[f'{feat}_0'] = prior_node_feats[feat]
-
-        # sample the prior for the edge features    
-        upper_edge_mask = torch.zeros(g.num_edges(), dtype=torch.bool)
-        n_upper_edges = upper_edge_idxs.shape[1]
-        upper_edge_mask[:n_upper_edges] = True
-        # g.edata['e_0'] = edge_prior(upper_edge_mask, self.prior_config['e'])
+        g.ndata["x_0"] = align_prior(
+            torch.randn_like(positions),
+            positions,
+            permutation=True,
+            rigid_body=True,
+        )
 
         return g

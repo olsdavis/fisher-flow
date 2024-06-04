@@ -339,7 +339,7 @@ class NSimplex(Manifold):
         """
         # can just ignore points that have some zero coordinates
         # ie on the boundary; doesn't work with mask (changes shape)
-        return ((u * v) / x.sqrt()).sum(dim=-1, keepdim=True)
+        return ((u * v) / x).sum(dim=-1, keepdim=True)
 
     def parallel_transport(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
         """
@@ -391,7 +391,7 @@ class NSimplex(Manifold):
         """
         See `Manifold.send_to`.
         """
-        if m == NSphere:
+        if m == NSphere or m == GeooptSphere:
             return x.sqrt()
         elif m == NSimplex:
             return x
@@ -656,6 +656,44 @@ class LinearNSimplex(NSimplex):
         return torch.allclose(fast_dot(x, v), torch.tensor(0.0))
 
 
+class Euclidean(Manifold):
+    def exp_map(self, p: Tensor, v: Tensor) -> Tensor:
+        return p + v
+
+    def log_map(self, p: Tensor, q: Tensor) -> Tensor:
+        return q - p
+
+    def geodesic_distance(self, p: Tensor, q: Tensor) -> Tensor:
+        return (p - q).square().sum(dim=-1).sqrt()
+
+    def metric(self, x: Tensor, u: Tensor, v: Tensor) -> Tensor:
+        return fast_dot(u, v)
+
+    def parallel_transport(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
+        return v
+
+    def make_tangent(self, p: Tensor, v: Tensor, missing_coordinate: bool = False) -> Tensor:
+        return v
+
+    def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
+        return torch.randn((n, k, d))
+
+    def smooth_labels(self, labels: Tensor, mx: float = 0.98) -> Tensor:
+        return labels
+
+    def send_to(self, x: Tensor, m: type[Manifold]) -> Tensor:
+        return x
+
+    def all_belong(self, x: Tensor) -> bool:
+        return True
+
+    def all_belong_tangent(self, x: Tensor, v: Tensor) -> bool:
+        return True
+
+    def project(self, x: Tensor) -> Tensor:
+        return x
+
+
 def manifold_from_name(name: str) -> Manifold:
     """
     Returns the manifold corresponding to `name`.
@@ -666,4 +704,6 @@ def manifold_from_name(name: str) -> Manifold:
         return NSimplex()
     elif name == "linear-simplex":
         return LinearNSimplex()
+    elif name == "euclidean":
+        return Euclidean()
     raise ValueError(f"Unknown manifold: {name}")

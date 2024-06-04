@@ -854,6 +854,7 @@ class SFMModule(LightningModule):
         :param batch_idx: The index of the current batch.
         :return: A tensor of losses between model predictions and targets.
         """
+        signal = None
         if isinstance(x_1, list):
             x_1, signal = x_1
             # Only one of the two signal inputs is used (the first one)
@@ -892,6 +893,7 @@ class SFMModule(LightningModule):
             labels.
         :param batch_idx: The index of the current batch.
         """
+        signal = None
         if isinstance(x_1, list):
             x_1, signal = x_1
             # Only one of the two signal inputs is used (the first one)
@@ -974,6 +976,7 @@ class SFMModule(LightningModule):
             labels.
         :param batch_idx: The index of the current batch.
         """
+        signal = None
         if isinstance(x_1, list):
             x_1, signal = x_1
             # Only one of the two signal inputs is used (the first one)
@@ -994,7 +997,6 @@ class SFMModule(LightningModule):
                 self.log(f"test/{ft}-loss", getattr(self, f"test_{ft}_loss"), on_step=False, on_epoch=True, prog_bar=True)
         else:
             loss = self.model_step(x_1)
-            signal = None
 
         # update and log metrics
         self.test_loss(loss)
