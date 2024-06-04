@@ -108,11 +108,13 @@ class Manifold(ABC):
         dt = 1.0 / steps
         x = x_0
         t = torch.zeros((x.size(0), 1), device=x_0.device)
+        xs = [x_0]
         for _ in range(steps):
             t += dt
             x = self.exp_map(x, self.make_tangent(x, model(x, t)) * dt)
             x = self.project(x)
-        return x
+            xs += [x]
+        return xs
 
     def pairwise_geodesic_distance(
         self,
