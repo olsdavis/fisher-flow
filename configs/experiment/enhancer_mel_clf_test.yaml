@@ -1,0 +1,61 @@
+# @package _global_
+
+# to execute this experiment run:
+# python train.py experiment=example
+
+defaults:
+  - override /data: enhancer
+  - override /model: enhancer_mel_clf
+  - override /callbacks: default
+  - override /trainer: default
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+
+tags: ["enhancer", "cnn", "clf"]
+
+seed: 12345
+
+trainer:
+  max_steps: 450000
+  max_epochs: 100000
+  limit_train_batches: null
+  gradient_clip_val: 1.0
+  check_val_every_n_epoch: 1
+  accelerator: 'gpu'
+  devices: [3]
+
+
+model:
+  model: 
+    hidden: 128
+    depth: 4
+    mode: "dirichlet"
+    #num_cls: 81 # output classes 47 for MEL
+    num_cls: 47 # output classes 47 for MEL
+    clean_data: true
+    classifier: true
+    dropout: 0.2
+  num_cls: 47
+
+data:
+  batch_size: 256
+  #dataset: "FlyBrain" # choices are "MEL2" and "FlyBrain" 47 classes and 81 classes
+  dataset: "MEL2" # choices are "MEL2" and "FlyBrain" 47 classes and 81 classes
+
+model_checkpoint:
+  monitor: 'val/loss' # val_perplexity
+
+logger:
+  wandb:
+    project: sfm
+    tags: ${tags}
+    group: enhancer
+    name: test_enhancer_clf_stark_${data.dataset}_s${seed}
+  aim:
+    experiment: "enhancer"
+
+# this our own custom run
+#ckpt_path: /homes/44/skessler/simplex-flow/logs/train/runs/2024-05-21_15-51-17/checkpoints/last.ckpt
+# model from Stark et al.
+ckpt_path: workdir/clsMELclean_cnn_dropout02_2023-12-31_12-26-28/epoch=9-step=5540.ckpt

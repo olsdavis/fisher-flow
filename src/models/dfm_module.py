@@ -785,7 +785,7 @@ class DNAModule(GeneralModule):
             #self.distill_model = DeepFlyBrainModel(self.distill_args, alphabet_size=self.model.alphabet_size,num_cls=self.model.num_cls)
         else:
             raise NotImplementedError()
-        upgraded_dict = upgrade_state_dict(torch.load(self.distill_ckpt, map_location=self.device)['state_dict'], prefixes=['model.'])
+        upgraded_dict = upgrade_state_dict(torch.load(self.distill_ckpt, map_location=self.device)['state_dict'], prefixes=['model.', 'net.'])
         no_cls_dict = {k: v for k, v in upgraded_dict.items() if 'cls_model' not in k}
         self.distill_model.load_state_dict(no_cls_dict)
         self.distill_model.eval()
@@ -824,7 +824,7 @@ class DNAModule(GeneralModule):
                 raise NotImplementedError()
             else:
                 raise NotImplementedError()
-            self.cls_model.load_state_dict(upgrade_state_dict(torch.load(self.cls_ckpt, map_location=self.device)['state_dict'],prefixes=['model.']))
+            self.cls_model.load_state_dict(upgrade_state_dict(torch.load(self.cls_ckpt, map_location=self.device)['state_dict'],prefixes=['model.', 'net.']))
             self.cls_model.eval()
             self.cls_model.to(self.device)
             for param in self.cls_model.parameters():
@@ -859,7 +859,7 @@ class DNAModule(GeneralModule):
                 #self.clean_cls_model = DeepFlyBrainModel(hparams['args'], alphabet_size=self.model.alphabet_size, num_cls=self.model.num_cls, classifier=True)
             else:
                 raise NotImplementedError()
-            self.clean_cls_model.load_state_dict(upgrade_state_dict(torch.load(self.clean_cls_ckpt, map_location=self.device)['state_dict'], prefixes=['model.']))
+            self.clean_cls_model.load_state_dict(upgrade_state_dict(torch.load(self.clean_cls_ckpt, map_location=self.device)['state_dict'], prefixes=['model.', 'net.']))
             self.clean_cls_model.eval()
             self.clean_cls_model.to(self.device)
             for param in self.clean_cls_model.parameters():
@@ -1202,7 +1202,7 @@ class PromoterModule(GeneralModule):
             mode=self.distill_args.mode, embed_dim=self.distill_args.embed_dim,
             time_dependent_weights=self.distill_args.time_dependent_weights,
             time_step=self.distill_args.time_step)
-        upgraded_dict = upgrade_state_dict(torch.load(self.distill_ckpt, map_location=self.device)['state_dict'], prefixes=['model.'])
+        upgraded_dict = upgrade_state_dict(torch.load(self.distill_ckpt, map_location=self.device)['state_dict'], prefixes=['model.', 'net.'])
         self.distill_model.load_state_dict(upgraded_dict)
         self.distill_model.eval()
         self.distill_model.to(self.device)

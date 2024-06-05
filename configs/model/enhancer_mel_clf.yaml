@@ -1,0 +1,31 @@
+_target_: src.models.SequenceClassificationModel
+
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 0.001
+  weight_decay: 0.0
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+  _partial_: true
+  mode: min
+  factor: 0.9
+  patience: 10
+
+model:
+  _target_: src.models.net.CNNModel
+  dim: 4 #  alphabet size
+  hidden: 128
+  num_cls: 47 #81 # output classes 47 for MEL
+  depth: 1
+  dropout: 0.0
+  prior_pseudocount: 2.0
+  cls_expanded_simplex: false
+  clean_data: true
+  classifier: true
+  classifier_free_guidance: false
+
+num_cls: 47
+
+

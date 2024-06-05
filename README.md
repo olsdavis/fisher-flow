@@ -37,6 +37,12 @@ To run the fisher flows on the fly brain enhancer dataset:
 python -m src.train experiment=enhancer_sfm logger=wandb
 ```
 
+### Enhancer classifier for FBD
+
+```py
+python -m src.train experiment=enhancer_mel_clf logger=wandb
+```
+
 ## RetroBridge: Products and Reactants Experiment
 
 Test whether the data has been loaded correctly:

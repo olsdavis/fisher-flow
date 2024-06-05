@@ -63,6 +63,10 @@ class PromoterDesignDataModule(LightningDataModule):
                 )
             self.batch_size_per_device = self.hparams.batch_size // self.trainer.world_size
 
+        print(f"train len {len(self.data_train)}")
+        print(f"val len {len(self.data_val)}")
+        print(f"test len {len(self.data_test)}")
+
     def train_dataloader(self) -> DataLoader[Any]:
         """Create and return the train dataloader.
 

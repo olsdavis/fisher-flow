@@ -23,7 +23,7 @@ trainer:
   gradient_clip_val: 1.0
   check_val_every_n_epoch: 10
   accelerator: 'gpu'
-  devices: [3]
+  devices: [2]
 
 model:
   compile: false
@@ -43,8 +43,10 @@ model:
   guidance_scale: 3
   #clean_cls_ckpt_hparams: workdir/clsDNAclean_cnn_1stack_2023-12-30_15-01-30/lightning_logs/version_0/hparams.yaml
   #clean_cls_ckpt: workdir/clsDNAclean_cnn_1stack_2023-12-30_15-01-30/epoch=15-step=10480.ckpt
-  clean_cls_ckpt_hparams: workdir/clsMELclean_cnn_dropout02_2023-12-31_12-26-28/lightning_logs/version_0/hparams.yaml
-  clean_cls_ckpt: workdir/clsMELclean_cnn_dropout02_2023-12-31_12-26-28/epoch=9-step=5540.ckpt
+  #clean_cls_ckpt_hparams: workdir/clsMELclean_cnn_dropout02_2023-12-31_12-26-28/lightning_logs/version_0/hparams.yaml
+  #clean_cls_ckpt: workdir/clsMELclean_cnn_dropout02_2023-12-31_12-26-28/epoch=9-step=5540.ckpt
+  clean_cls_ckpt_hparams: /homes/44/skessler/simplex-flow/logs/train/runs/2024-05-21_17-20-10/hparams.yaml
+  clean_cls_ckpt: /homes/44/skessler/simplex-flow/logs/train/runs/2024-05-21_17-20-10/checkpoints/epoch_019.ckpt
   target_class: 2
   allow_nan_cfactor: true
   all_class_inference: false
@@ -63,12 +65,12 @@ logger:
     project: sfm
     tags: ${tags}
     group: enhancer
-    name: TEST_enhancer_dfm_${data.dataset}_s${seed}
+    name: TEST_enhancer_dfm_clf_${data.dataset}_s${seed}
   aim:
     experiment: "enhancer"
 
-ckpt_path: /homes/44/skessler/simplex-flow/logs/train/runs/2024-05-17_17-16-41/checkpoints/epoch_409.ckpt
-#ckpt_path: /homes/44/skessler/simplex-flow/logs/train/runs/2024-05-17_17-17-16/checkpoints/epoch_729.ckpt
-#ckpt_path: /homes/44/skessler/simplex-flow/logs/train/runs/2024-05-17_17-18-45/checkpoints/epoch_719.ckpt
+ckpt_path: /homes/44/skessler/simplex-flow/logs/train/runs/2024-05-17_17-16-41/checkpoints/epoch_1459.ckpt
+#ckpt_path: /homes/44/skessler/simplex-flow/logs/train/runs/2024-05-17_17-17-16/checkpoints/epoch_1429.ckpt
+#ckpt_path: /homes/44/skessler/simplex-flow/logs/train/runs/2024-05-17_17-18-45/checkpoints/epoch_1359.ckpt
 #ckpt_path: /homes/44/skessler/simplex-flow/logs/train/runs/2024-05-17_17-19-38/checkpoints/epoch_839.ckpt
 #ckpt_path: /homes/44/skessler/simplex-flow/logs/train/runs/2024-05-17_17-19-58/checkpoints/epoch_689.ckpt

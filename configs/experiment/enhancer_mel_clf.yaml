@@ -1,0 +1,57 @@
+# @package _global_
+
+# to execute this experiment run:
+# python train.py experiment=example
+
+defaults:
+  - override /data: enhancer
+  - override /model: enhancer_mel_clf
+  - override /callbacks: default
+  - override /trainer: default
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+
+tags: ["enhancer", "cnn", "clf"]
+
+seed: 12345
+
+trainer:
+  max_steps: 450000
+  max_epochs: 100000
+  limit_train_batches: null
+  gradient_clip_val: 1.0
+  check_val_every_n_epoch: 1
+  accelerator: 'gpu'
+  devices: [3]
+
+model:
+  model: 
+    hidden: 128
+    depth: 1
+    dropout: 0.1
+    mode: ""
+    #num_cls: 81 # output classes 47 for MEL
+    num_cls: 47 # output classes 47 for MEL
+    clean_data: true
+    classifier: true
+  num_cls: 47
+  optimizer:
+    weight_decay: 0.0001
+
+data:
+  batch_size: 256
+  #dataset: "FlyBrain" # choices are "MEL2" and "FlyBrain" 47 classes and 81 classes
+  dataset: "MEL2" # choices are "MEL2" and "FlyBrain" 47 classes and 81 classes
+
+model_checkpoint:
+  monitor: 'val/loss' # val_perplexity
+
+logger:
+  wandb:
+    project: sfm
+    tags: ${tags}
+    group: enhancer
+    name: enhancer_clf_${data.dataset}_wd${model.optimizer.weight_decay}_s${seed}
+  aim:
+    experiment: "enhancer"

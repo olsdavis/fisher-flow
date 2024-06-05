@@ -47,6 +47,7 @@ clean_cls_ckpt: workdir/clsDNAclean_cnn_1stack_2023-12-30_15-01-30/epoch=15-step
 target_class: 2
 
 allow_nan_cfactor: true
+
 all_class_inference: false
 probability_addition: false
 

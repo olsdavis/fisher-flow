@@ -763,30 +763,38 @@ class CNNModel(nn.Module):
             )
 
         self.num_layers = 5 * self.depth
-        self.convs = [nn.Conv1d(self.hidden, self.hidden, kernel_size=9, padding=4),
-                                     nn.Conv1d(self.hidden, self.hidden, kernel_size=9, padding=4),
-                                     nn.Conv1d(self.hidden, self.hidden, kernel_size=9, dilation=4, padding=16),
-                                     nn.Conv1d(self.hidden, self.hidden, kernel_size=9, dilation=16, padding=64),
-                                     nn.Conv1d(self.hidden, self.hidden, kernel_size=9, dilation=64, padding=256)]
+        self.convs = [
+            nn.Conv1d(self.hidden, self.hidden, kernel_size=9, padding=4),
+            nn.Conv1d(self.hidden, self.hidden, kernel_size=9, padding=4),
+            nn.Conv1d(self.hidden, self.hidden, kernel_size=9, dilation=4, padding=16),
+            nn.Conv1d(self.hidden, self.hidden, kernel_size=9, dilation=16, padding=64),
+            nn.Conv1d(self.hidden, self.hidden, kernel_size=9, dilation=64, padding=256),
+        ]
+        # x = [1, 2, 3, 4, 5]
+        # [a for a in x for _ in range(5)]
+        # [1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5]
         self.convs = nn.ModuleList([copy.deepcopy(layer) for layer in self.convs for i in range(self.depth)])
         self.time_layers = nn.ModuleList([Dense(self.hidden, self.hidden) for _ in range(self.num_layers)])
         self.norms = nn.ModuleList([nn.LayerNorm(self.hidden) for _ in range(self.num_layers)])
-        self.final_conv = nn.Sequential(nn.Conv1d(self.hidden, self.hidden, kernel_size=1),
-                                   nn.ReLU(),
-                                   nn.Conv1d(self.hidden, self.hidden
-                                       if classifier else self.dim, kernel_size=1))
+        self.final_conv = nn.Sequential(
+            nn.Conv1d(self.hidden, self.hidden, kernel_size=1),
+            nn.ReLU(),
+            nn.Conv1d(self.hidden, self.hidden if classifier else self.dim, kernel_size=1),
+        )
         self.dropout = nn.Dropout(self.dropout)
         if classifier:
-            self.cls_head = nn.Sequential(nn.Linear(self.hidden, self.hidden),
-                                   nn.ReLU(),
-                                   nn.Linear(self.hidden, self.num_cls))
+            self.cls_head = nn.Sequential(
+                nn.Linear(self.hidden, self.hidden),
+                nn.ReLU(),
+                nn.Linear(self.hidden, self.num_cls),
+            )
         if self.cls_free_guidance and not self.classifier:
             self.cls_embedder = nn.Embedding(num_embeddings=self.num_cls + 1, embedding_dim=self.hidden)
             self.cls_layers = nn.ModuleList([Dense(self.hidden, self.hidden) for _ in range(self.num_layers)])
 
     def forward(self, x, t: Tensor | None, cls = None, return_embedding=False):
         seq = x#.view(-1, self.k, self.dim)
-        if len(t.shape) == 0 and t is not None:
+        if t is not None and len(t.shape) == 0:
             # odeint is on
             t = t[None].expand(seq.size(0))
         if self.clean_data:
