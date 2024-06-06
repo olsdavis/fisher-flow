@@ -27,11 +27,11 @@ model:
   inference_steps: 100
   features_manifolds:
     x: euclidean
-    a: sphere
-    c: sphere
-    e: sphere
+    a: euclidean
+    c: euclidean
+    e: euclidean
   features_priors:
-    x: gaussian
+    x: centered-gaussian
     a: uniform
     e: uniform
     c: uniform

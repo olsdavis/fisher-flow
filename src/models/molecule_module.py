@@ -59,6 +59,17 @@ class GaussianPrior(Prior):
         return torch.randn((n, k, d))
 
 
+class CenteredGaussianPrior(GaussianPrior):
+    """
+    A Gaussian prior distribution centered at the mean of the training data.
+    """
+
+    def sample(self, n: int, k: int, d: int) -> Tensor:
+        ret = torch.randn((n, k * d))
+        ret = ret - ret.mean(dim=0, keepdim=True)
+        return ret.reshape(n, k, d)
+
+
 def _get_prior(name: str, manifold: Manifold) -> Prior:
     """
     Returns a prior distribution.
@@ -67,6 +78,8 @@ def _get_prior(name: str, manifold: Manifold) -> Prior:
         return UniformPrior(manifold)
     if name == "gaussian":
         return GaussianPrior(manifold)
+    if name == "centered-gaussian":
+        return CenteredGaussianPrior(manifold)
     raise ValueError(f"unknown prior: {name}")
 
 
@@ -133,9 +146,9 @@ class MoleculeModule(LightningModule):
         self.test_loss = MeanMetric()
         # same but for individual features
         for key in self.features_manifolds:
-            setattr(self, f"train/{key}_loss", MeanMetric())
-            setattr(self, f"val/{key}_loss", MeanMetric())
-            setattr(self, f"test/{key}_loss", MeanMetric())
+            setattr(self, f"train_{key}_loss", MeanMetric())
+            setattr(self, f"val_{key}_loss", MeanMetric())
+            setattr(self, f"test_{key}_loss", MeanMetric())
 
     def forward(self, x: GraphData, t: Tensor) -> Tensor:
         """Perform a forward pass through the model `self.net`.
@@ -221,11 +234,12 @@ class MoleculeModule(LightningModule):
         # initialise priors
         for key, prior in self.features_priors.items():
             if key == "e":
-                inp.edata["e_0"] = (
-                    prior.sample(inp.num_edges(), 1, self.features_lengths["e"]).squeeze()
-                ).to(self.device)
+                put = torch.zeros(inp.num_edges(), self.features_lengths["e"])
                 upper = get_upper_edge_mask(inp)
-                inp.edata["e_0"][~upper] = inp.edata["e_0"][upper]
+                sampled_edge_prior = prior.sample(upper.sum().item(), 1, self.features_lengths["e"]).squeeze()
+                put[upper] = sampled_edge_prior
+                put[~upper] = sampled_edge_prior
+                inp.edata["e_0"] = put.to(self.device)
             else:
                 if key == "x" and not do_x:
                     continue
@@ -248,20 +262,34 @@ class MoleculeModule(LightningModule):
         with torch.no_grad():
             inp = self.initialize_random_noise(inp)
             node_batch_idx, edge_batch_idx = get_batch_idxs(inp)
+            upper = get_upper_edge_mask(inp)
             t = torch.rand(inp.batch_size, device=self.device)
+            all_lw = self.net.interpolant_scheduler.loss_weights(t)
+            inp = self.net.sample_conditional_path(inp, t, node_batch_idx, edge_batch_idx)
         # now, forward through model
-        inp = self.net.sample_conditional_path(inp, t, node_batch_idx, edge_batch_idx)
-        output = self.net(inp, t, node_batch_idx, edge_batch_idx, apply_softmax=False, remove_com=False)
+        output = self.net(inp, t, node_batch_idx, upper, apply_softmax=False, remove_com=False)
         losses = {}
         for key in self.features_manifolds.keys():
+            lw = all_lw[:, ["x", "a", "c", "e"].index(key)]
             if key == "x":
                 losses[key] = F.mse_loss(
-                    output[key], inp.ndata[f"{key}_1_true"], reduction="mean",
+                    output[key], inp.ndata[f"{key}_1_true"], reduction="none",
                 )
             else:
                 losses[key] = F.cross_entropy(
-                    output[key], inp.ndata[f"{key}_1_true"] if key != "e" else inp.edata[f"{key}_1_true"], reduction="mean",
+                    output[key],
+                    (inp.ndata[f"{key}_1_true"] if key != "e" else inp.edata[f"{key}_1_true"][upper]).argmax(dim=-1),
+                    reduction="none",
                 )
+            if key == "e":
+                # apply the weights
+                losses[key] = losses[key] * lw[edge_batch_idx][upper]
+            else:
+                use_lw = lw[node_batch_idx]
+                if key == "x":
+                    use_lw = use_lw.unsqueeze(-1)
+                losses[key] = losses[key] * use_lw
+            losses[key] = losses[key].mean()
         return losses
 
     def model_step(self, inp: GraphData) -> dict[str, Tensor]:
@@ -282,7 +310,14 @@ class MoleculeModule(LightningModule):
         """
         losses = self.model_step(batch)
         for key, loss in losses.items():
-            getattr(self, f"train/{key}_loss")(loss)
+            getattr(self, f"train_{key}_loss")(loss)
+            self.log(
+                f"train/{key}_loss",
+                getattr(self, f"train_{key}_loss"),
+                on_step=False,
+                on_epoch=True,
+                prog_bar=key == "e",
+            )
 
         if self.loss_weights is not None:
             loss = sum(
@@ -303,7 +338,14 @@ class MoleculeModule(LightningModule):
         """
         losses = self.model_step(batch)
         for key, loss in losses.items():
-            getattr(self, f"val/{key}_loss")(loss)
+            getattr(self, f"val_{key}_loss")(loss)
+            self.log(
+                f"val/{key}_loss",
+                getattr(self, f"val_{key}_loss"),
+                on_step=False,
+                on_epoch=True,
+                prog_bar=False,
+            )
 
         if self.loss_weights is not None:
             loss = sum(
@@ -329,7 +371,14 @@ class MoleculeModule(LightningModule):
         """
         losses = self.model_step(batch)
         for key, loss in losses.items():
-            getattr(self, f"test/{key}_loss")(loss)
+            getattr(self, f"test_{key}_loss")(loss)
+            self.log(
+                f"test/{key}_loss",
+                getattr(self, f"test_{key}_loss"),
+                on_step=False,
+                on_epoch=True,
+                prog_bar=False,
+            )
 
         if self.loss_weights is not None:
             loss = sum(

@@ -1,10 +1,10 @@
 _target_: src.models.MoleculeModule
 
 optimizer:
-  _target_: torch.optim.AdamW
+  _target_: torch.optim.Adam
   _partial_: true
-  lr: 0.001
-  weight_decay: 0.0
+  lr: 0.0001
+  weight_decay: 1.0e-12
 
 scheduler:
   _target_: torch.optim.lr_scheduler.CosineAnnealingLR
@@ -20,7 +20,7 @@ net:
   n_vec_channels: 16
   update_edge_w_distance: True
   n_hidden_scalars: 256
-  n_hidden_edge_feats: 128 
+  n_hidden_edge_feats: 128
   n_recycles: 1
   separate_mol_updaters: True
   n_molecule_updates: 8

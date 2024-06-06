@@ -393,7 +393,7 @@ class NSimplex(Manifold):
         """
         if m == NSphere or m == GeooptSphere:
             return x.sqrt()
-        elif m == NSimplex:
+        elif m == NSimplex or m == Euclidean:
             return x
         raise NotImplementedError(f"unimplemented for {m}")
 
