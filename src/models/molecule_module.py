@@ -4,6 +4,7 @@ A module for molecular generative tasks, namely: QM9, GeomDrugs, Retrosynthesis.
 from abc import ABC, abstractmethod
 from typing import Any
 from torch_geometric.data import Batch as TGBatch
+from torch_geometric.utils import to_dense_batch
 import torch
 from torch import Tensor
 from torch.nn import functional as F
@@ -14,13 +15,13 @@ from lightning import LightningModule
 
 
 from src.sfm import Manifold, manifold_from_name
+from src.data import retrobridge_utils
 from src.data.components.qm_utils import (
     get_batch_idxs, get_upper_edge_mask, build_edge_idxs,
 )
 from src.data.components.sample_analyzer import (
     SampleAnalyzer, SampledMolecule,
 )
-from src.data.components.molecule_prior import align_prior
 
 
 GraphData = TGBatch | DGLGraph
@@ -224,7 +225,27 @@ class MoleculeModule(LightningModule):
         """
         Computes losses for conditional models.
         """
-        raise NotImplementedError("conditional_step must be implemented for conditional models")
+        # x_1 is the reactant, stored in data.x, ...
+        # x_0 is the product, stored in data.p_x, ...
+        with torch.no_grad():
+            # get batch index
+            t = torch.rand(inp.batch_size, 1, device=self.device)
+            reactants, r_node_mask = retrobridge_utils.to_dense(
+                inp.x, inp.edge_index, inp.edge_attr, inp.batch,
+            )
+            reactants = reactants.mask(r_node_mask)
+            product, p_node_mask = retrobridge_utils.to_dense(
+                inp.p_x, inp.p_edge_index, inp.p_edge_attr, inp.batch,
+            )
+            product = product.mask(p_node_mask)
+            noisy_data = {
+                "t": t,
+                "E_t": e_t,
+                "X_t": x_t,
+                "y": y_t,
+                "y_t": y_t,
+                "node_mask": r_node_mask,
+            }
 
     def initialize_random_noise(self, inp: DGLGraph, do_x: bool = False) -> DGLGraph:
         """

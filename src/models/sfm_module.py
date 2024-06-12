@@ -255,6 +255,12 @@ class SFMModule(LightningModule):
                 self.dataset_infos,
                 datamodule.train_smiles,
             )
+            self.train_x_loss = MeanMetric()
+            self.train_e_loss = MeanMetric()
+            self.val_x_loss = MeanMetric()
+            self.val_e_loss = MeanMetric()
+            self.test_x_loss = MeanMetric()
+            self.test_e_loss = MeanMetric()
         else:
             self.dataset_infos = None
         if fast_matmul:
@@ -273,6 +279,9 @@ class SFMModule(LightningModule):
         self.sp_mse.reset()
         if hasattr(self, "val_fbd"):
             self.val_fbd.reset()
+        if hasattr(self, "val_x_loss"):
+            self.val_x_loss.reset()
+            self.val_e_loss.reset()
 
     def on_validation_epoch_start(self):
         for optim in self.trainer.optimizers:
@@ -311,7 +320,7 @@ class SFMModule(LightningModule):
 
     def retrobridge_step(
         self, data: Batch,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Performs a step on retrobridge data, returns loss.
         """
@@ -332,28 +341,43 @@ class SFMModule(LightningModule):
         # now, need to train over product of these buggers
 
         target_edge_shape = (product.E.size(0), -1, product.E.size(-1))
-        edges_t, edges_target = self.compute_target(
-            product.E.reshape(target_edge_shape),
-            reactants.E.reshape(target_edge_shape),
-            t,
-        )
-        edges_t = edges_t.reshape_as(product.E)
-        edges_target = edges_target.reshape_as(product.E)
-        # symmetrise edges_t, edges_target
-        edges_t = self.symmetrise_edges(edges_t)
-        edges_target = self.symmetrise_edges(edges_target)
-        feats_t, feats_target = self.compute_target(
-            product.X,
-            reactants.X,
-            t,
-        )
-        # mask things not included
-        feats_t, edges_t = self.mask_like_placeholder(p_node_mask, feats_t, edges_t)
-        feats_target, edges_target = self.mask_like_placeholder(
-            p_node_mask,
-            feats_target,
-            edges_target,
-        )
+        if self.predict_mol:
+            edges_t = self.manifold.geodesic_interpolant(
+                product.E.reshape(target_edge_shape),
+                reactants.E.reshape(target_edge_shape),
+                t,
+            )
+            edges_t = edges_t.reshape_as(product.E)
+            edges_t = self.symmetrise_edges(edges_t)
+            feats_t = self.manifold.geodesic_interpolant(
+                product.X,
+                reactants.X,
+                t,
+            )
+            feats_t, edges_t = self.mask_like_placeholder(p_node_mask, feats_t, edges_t)
+        else:
+            edges_t, edges_target = self.compute_target(
+                product.E.reshape(target_edge_shape),
+                reactants.E.reshape(target_edge_shape),
+                t,
+            )
+            edges_t = edges_t.reshape_as(product.E)
+            edges_target = edges_target.reshape_as(product.E)
+            # symmetrise edges_t, edges_target
+            edges_t = self.symmetrise_edges(edges_t)
+            edges_target = self.symmetrise_edges(edges_target)
+            feats_t, feats_target = self.compute_target(
+                product.X,
+                reactants.X,
+                t,
+            )
+            # mask things not included
+            feats_t, edges_t = self.mask_like_placeholder(p_node_mask, feats_t, edges_t)
+            feats_target, edges_target = self.mask_like_placeholder(
+                p_node_mask,
+                feats_target,
+                edges_target,
+            )
 
 
         # checks
@@ -385,23 +409,38 @@ class SFMModule(LightningModule):
         modifiable_nodes = (product.X[..., -1] == 1).unsqueeze(-1)
         fixed_nodes = (product.X[..., -1] == 0).unsqueeze(-1)
         assert torch.all(modifiable_nodes | fixed_nodes)
-        loss_x_raw = (
-            self.manifold.masked_tangent_projection(feats_t, pred.X) - feats_target
-        ) * modifiable_nodes
-        # reshape for B, K, D shape
-        edges_t = edges_t.reshape(edges_t.size(0), -1, edges_t.size(-1))
-        pred_reshaped = pred.E.reshape(pred.E.size(0), -1, pred.E.size(-1))
-        loss_edges_raw = (
-            self.manifold.masked_tangent_projection(edges_t, pred_reshaped) - edges_target.reshape_as(edges_t)
-        )
-        # loss_edges_raw = loss_edges_raw.reshape_as(product.E)
+        if self.predict_mol:
+            pred_x = pred.X * modifiable_nodes + product.X * fixed_nodes
+            loss_x_raw = F.cross_entropy(
+                pred_x.transpose(1, 2), reactants.X.argmax(dim=-1), reduction="none"
+            ) * modifiable_nodes.squeeze()
+            loss_x_raw = loss_x_raw.sum() / modifiable_nodes.sum()
+            mask_e = (reactants.E != 0.).any(dim=-1)
+            loss_edges = F.cross_entropy(
+                pred.E[mask_e, :],
+                reactants.E.argmax(dim=-1)[mask_e],
+                reduction="mean",
+            )
+            return loss_x_raw + 5.0 * loss_edges, loss_x_raw, loss_edges
+        else:
+            loss_x_raw = (
+                self.manifold.masked_tangent_projection(feats_t, pred.X) - feats_target
+            ) * modifiable_nodes
+            # reshape for B, K, D shape
+            edges_t = edges_t.reshape(edges_t.size(0), -1, edges_t.size(-1))
+            pred_reshaped = pred.E.reshape(pred.E.size(0), -1, pred.E.size(-1))
+            loss_edges_raw = (
+                self.manifold.masked_tangent_projection(edges_t, pred_reshaped) - edges_target.reshape_as(edges_t)
+            )
+            # loss_edges_raw = loss_edges_raw.reshape_as(product.E)
 
-        # final_X, final_E = self.mask_like_placeholder(p_node_mask, loss_x_raw, loss_edges_raw)
-        loss = (
-            loss_x_raw.square().sum(dim=(-1, -2))
-            + 5.0 * loss_edges_raw.square().sum(dim=(-1, -2, -3))  # 5.0* done in retrobridge
-        ).mean()
-        return loss
+            # final_X, final_E = self.mask_like_placeholder(p_node_mask, loss_x_raw, loss_edges_raw)
+            x_loss = loss_x_raw.square().sum(dim=(-1, -2))
+            e_loss = loss_edges_raw.square().sum(dim=(-1, -2, -3))
+            loss = (
+                x_loss + 5.0 * e_loss  # 5.0* done in retrobridge
+            ).mean()
+            return loss, x_loss, e_loss
 
     def retrobridge_forward(self, noisy_data: dict[str, Any], extra_data: PlaceHolder, node_mask: torch.Tensor) -> torch.Tensor:
         X = torch.cat((noisy_data['X_t'], extra_data.X), dim=2).float()
@@ -614,20 +653,34 @@ class SFMModule(LightningModule):
             pred = self.retrobridge_forward(noisy_data, extra_data, node_mask)
             # prep
             target_edge_shape = (E.size(0), -1, E.size(-1))
+            tt = dt / (1.0 - t + 1e-8)
+            tt = tt[..., None]
             # make a step
-            X = self.manifold.exp_map(
-                X, self.manifold.make_tangent(X, pred.X) * dt,
-            )
+            if self.predict_mol:
+                X = self.manifold.exp_map(
+                    X,
+                    self.manifold.log_map(X, pred.X.softmax(dim=-1)) * tt,
+                )
+            else:
+                X = self.manifold.exp_map(
+                    X, self.manifold.make_tangent(X, pred.X) * dt,
+                )
             X = self.manifold.project(X)
             X = X * modifiable_nodes + product.X * fixed_nodes
             E = E.reshape(target_edge_shape)
-            E = self.manifold.exp_map(
-                E,
-                self.manifold.masked_tangent_projection(
+            if self.predict_mol:
+                E = self.manifold.exp_map(
                     E,
-                    pred.E.reshape((pred.E.size(0), -1, pred.E.size(-1))),
-                ) * dt,
-            )
+                    self.manifold.log_map(E, pred.E.reshape(target_edge_shape).softmax(dim=-1)) * tt,
+                )
+            else:
+                E = self.manifold.exp_map(
+                    E,
+                    self.manifold.masked_tangent_projection(
+                        E,
+                        pred.E.reshape((pred.E.size(0), -1, pred.E.size(-1))),
+                    ) * dt,
+                )
             E = self.manifold.masked_projection(E)
             y = pred.y
             t += dt
@@ -864,7 +917,11 @@ class SFMModule(LightningModule):
             else:
                 loss = self.model_step(x_1, {"cls": signal})
         elif isinstance(x_1, Batch):
-            loss = self.retrobridge_step(x_1)
+            loss, x_loss, e_loss = self.retrobridge_step(x_1)
+            self.train_x_loss(x_loss)
+            self.train_e_loss(e_loss)
+            self.log("train/x-loss", self.train_x_loss, on_step=False, on_epoch=True, prog_bar=False)
+            self.log("train/e-loss", self.train_e_loss, on_step=False, on_epoch=True, prog_bar=False)
         elif isinstance(x_1, DGLGraph):
             loss, a_loss, x_loss, c_loss, e_loss  = self.qm_step(x_1)
             self.train_a_loss(a_loss)
@@ -903,7 +960,11 @@ class SFMModule(LightningModule):
             else:
                 loss = self.model_step(x_1, {"cls": signal})
         elif isinstance(x_1, Batch):
-            loss = self.retrobridge_step(x_1)
+            loss, x_loss, e_loss = self.retrobridge_step(x_1)
+            self.val_x_loss(x_loss)
+            self.val_e_loss(e_loss)
+            self.log("val/x-loss", self.val_x_loss, on_step=False, on_epoch=True, prog_bar=False)
+            self.log("val/e-loss", self.val_e_loss, on_step=False, on_epoch=True, prog_bar=False)
         elif isinstance(x_1, DGLGraph):
             loss, a_loss, x_loss, c_loss, e_loss  = self.qm_step(x_1)
             self.val_a_loss(a_loss)
@@ -986,7 +1047,11 @@ class SFMModule(LightningModule):
             else:
                 loss = self.model_step(x_1, {"cls": signal})
         elif isinstance(x_1, Batch):
-            loss = self.retrobridge_step(x_1)
+            loss, x_loss, e_loss = self.retrobridge_step(x_1)
+            self.test_x_loss(x_loss)
+            self.test_e_loss(e_loss)
+            self.log("test/x-loss", self.test_x_loss, on_step=False, on_epoch=True, prog_bar=False)
+            self.log("test/e-loss", self.test_e_loss, on_step=False, on_epoch=True, prog_bar=False)
         elif isinstance(x_1, DGLGraph):
             loss, a_loss, x_loss, c_loss, e_loss  = self.qm_step(x_1)
             self.test_a_loss(a_loss)

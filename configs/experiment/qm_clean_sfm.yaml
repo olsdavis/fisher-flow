@@ -27,9 +27,9 @@ model:
   inference_steps: 100
   features_manifolds:
     x: euclidean
-    a: euclidean
-    c: euclidean
-    e: euclidean
+    a: simplex
+    c: simplex
+    e: simplex
   features_priors:
     x: centered-gaussian
     a: uniform
@@ -46,12 +46,18 @@ model:
   net:
     n_atom_types: 5
     features_manifolds: ${model.features_manifolds}
+    interpolant_scheduler: cosine
+    cosine_params:
+      x: 1
+      a: 2
+      c: 2
+      e: 2
 
 logger:
   wandb:
     tags: ${tags}
     group: "qm9"
-    name: qm9_s${seed}
+    name: qm9_s${seed}_cosine_${model.features_manifolds.a}
     project: sfm-qm9
   aim:
     experiment: "qm9"
