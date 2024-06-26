@@ -367,7 +367,7 @@ class NSimplex(Manifold):
         """
         See `Manifold.uniform_prior`.
         """
-        return Dirichlet(4.1 * torch.ones((k, d))).sample((n,))
+        return Dirichlet(torch.ones((k, d))).sample((n,))
 
     @torch.no_grad()
     def smooth_labels(self, labels: Tensor, mx: float = 0.98) -> Tensor:
