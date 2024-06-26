@@ -28,9 +28,12 @@ model:
     lr: 0.0001
   compile: false
   inference_steps: 100
-  stochastic: false
   closed_form_drv: false
   ot_method: None
+  predict_mol: true
+  fast_matmul: true
+  net:
+    addition: false
 
 data:
   batch_size: 64

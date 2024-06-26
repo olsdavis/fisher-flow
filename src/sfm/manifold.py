@@ -315,7 +315,7 @@ class NSimplex(Manifold):
         """
         See `Manifold.log_map`.
         """
-        ret = torch.zeros_like(p)
+        """ret = torch.zeros_like(p)
         z = (p * q).sqrt()
         s = z.sum(dim=-1, keepdim=True)
         close = ((s.square() - 1.0).abs() < 1e-7).expand_as(ret)
@@ -324,7 +324,7 @@ class NSimplex(Manifold):
         """
         z = (p * q).sqrt()
         s = z.sum(dim=-1, keepdim=True)
-        return 2.0 * safe_arccos(s) / (1.0 - s.square()).sqrt() * (z - s * p)"""
+        return 2.0 * safe_arccos(s) / (1.0 - s.square()).sqrt() * (z - s * p)
 
     def geodesic_distance(self, p: Tensor, q: Tensor) -> Tensor:
         """

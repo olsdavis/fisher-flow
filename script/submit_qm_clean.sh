@@ -3,9 +3,9 @@
 #SBATCH --job-name=sfm 
 #SBATCH --output=slurm/slurm_%j.out
 #SBATCH --error=slurm/slurm_%j.err
-#SBATCH --time=12:00:00
+#SBATCH --time=72:00:00
 #SBATCH --mem=36000
-#SBATCH --qos=medium
+#SBATCH --qos=long
 #SBATCH --gres=gpu:1
 conda activate sfm
-srun -u python -m src.train experiment=qm_clean_sfm trainer=gpu logger=wandb seed=$1
+srun -u python -m src.train experiment=$2 trainer=gpu logger=wandb seed=$1

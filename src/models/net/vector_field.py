@@ -15,6 +15,7 @@ class EndpointVectorField(nn.Module):
         self,
         n_atom_types: int,
         interpolant_scheduler: str = "linear",
+        cosine_params: dict | None = None,
         canonical_feat_order: list = ['x', 'a', 'c', 'e'],
         n_charges: int = 6,
         n_bond_types: int = 5, 
@@ -50,7 +51,7 @@ class EndpointVectorField(nn.Module):
         self.separate_mol_updaters = separate_mol_updaters
         self.exclude_charges = exclude_charges
         self.interpolant_scheduler = InterpolantScheduler(
-            canonical_feat_order, interpolant_scheduler
+            canonical_feat_order, interpolant_scheduler, cosine_params
         )
         self.canonical_feat_order = canonical_feat_order
 
@@ -351,6 +352,7 @@ class EndpointVectorField(nn.Module):
         # compute x_s for each feature and set x_t = x_s
         for feat_idx, feat in enumerate(self.canonical_feat_order):
             x1_weight = alpha_t_prime_i[feat_idx]*(s_i - t_i)/(1 - alpha_t_i[feat_idx])
+            # alpha(t) * dt / (1 - alpha(t))
             xt_weight = 1 - x1_weight
 
             if feat == "e":
