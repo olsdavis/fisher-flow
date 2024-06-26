@@ -17,7 +17,7 @@ tags: ["qm9", "vecfield"]
 seed: 12345
 
 trainer:
-  min_epochs: 1
+  min_epochs: 500
   max_epochs: 500
   gradient_clip_val: 1.0
 
@@ -46,12 +46,7 @@ model:
   net:
     n_atom_types: 5
     features_manifolds: ${model.features_manifolds}
-    interpolant_scheduler: cosine
-    cosine_params:
-      x: 1
-      a: 2
-      c: 2
-      e: 2
+    interpolant_scheduler: linear
 
 logger:
   wandb:

@@ -32,6 +32,8 @@ model:
   ot_method: None
   predict_mol: true
   fast_matmul: true
+  net:
+    addition: false
 
 data:
   batch_size: 64

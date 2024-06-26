@@ -633,7 +633,7 @@ class SFMModule(LightningModule):
         )
         # do joint tangent Euler method
         dt = torch.tensor(1.0 / self.inference_steps, device=data.x.device)
-        t = torch.zeros(data.batch_size, 1, device=data.x.device)
+        t = torch.zeros(data.batch_size, 1, device=data.x.device, dtype=data.x.dtype)
         context = product.clone() if self.use_context else None
         orig_edge_shape = E.shape
         # Masks for fixed and modifiable nodes  | from Retrobridge
@@ -666,7 +666,6 @@ class SFMModule(LightningModule):
                     X, self.manifold.make_tangent(X, pred.X) * dt,
                 )
             X = self.manifold.project(X)
-            X = X * modifiable_nodes + product.X * fixed_nodes
             E = E.reshape(target_edge_shape)
             if self.predict_mol:
                 E = self.manifold.exp_map(
@@ -684,6 +683,7 @@ class SFMModule(LightningModule):
             E = self.manifold.masked_projection(E)
             y = pred.y
             t += dt
+            X = X * modifiable_nodes + product.X * fixed_nodes
             E = E.reshape(orig_edge_shape)
             X, E = self.mask_like_placeholder(node_mask, X, E)
             E = self.symmetrise_edges(E)
@@ -694,7 +694,6 @@ class SFMModule(LightningModule):
             y=y,
         ).mask(node_mask, collapse=True)
 
-        # E = self.symmetrise_edges(E)
         return ret
 
     def produce_text_samples(self, n: int) -> list[str]:

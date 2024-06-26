@@ -352,6 +352,7 @@ class EndpointVectorField(nn.Module):
         # compute x_s for each feature and set x_t = x_s
         for feat_idx, feat in enumerate(self.canonical_feat_order):
             x1_weight = alpha_t_prime_i[feat_idx]*(s_i - t_i)/(1 - alpha_t_i[feat_idx])
+            # alpha(t) * dt / (1 - alpha(t))
             xt_weight = 1 - x1_weight
 
             if feat == "e":
