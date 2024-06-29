@@ -137,6 +137,8 @@ class MoleculeModule(LightningModule):
         loss_weights: dict[str, float] | None = None,
         eval_mols_every: int = 1,
         n_eval_mols: int = 128,
+        time_weighted_loss: bool = False,
+        inference_scaling: float | None = None,
     ):
         """
         Parameters:
@@ -175,6 +177,8 @@ class MoleculeModule(LightningModule):
         self.inference_steps = inference_steps
         self.eval_mols_every = eval_mols_every
         self.n_eval_mols = n_eval_mols
+        self.time_weighted_loss = time_weighted_loss
+        self.inference_scaling = inference_scaling
 
         # for averaging loss across batches
         self.train_loss = MeanMetric()
@@ -234,6 +238,7 @@ class MoleculeModule(LightningModule):
             upper_edge_mask=upper_edge_mask,
             n_timesteps=n_timesteps,
             visualize=False,
+            inference_scaling=self.inference_scaling,
         )
 
         g = itg_result
@@ -325,27 +330,29 @@ class MoleculeModule(LightningModule):
         # now, forward through model
         output = self.net(inp, t, node_batch_idx, upper, apply_softmax=False, remove_com=False)
         losses = {}
+        reduction = "none" if self.time_weighted_loss else "mean"
         for key in self.features_manifolds.keys():
             lw = all_lw[:, ["x", "a", "c", "e"].index(key)]
             if key == "x":
                 losses[key] = F.mse_loss(
-                    output[key], inp.ndata[f"{key}_1_true"], reduction="none",
+                    output[key], inp.ndata[f"{key}_1_true"], reduction=reduction,
                 )
             else:
                 losses[key] = F.cross_entropy(
                     output[key],
                     (inp.ndata[f"{key}_1_true"] if key != "e" else inp.edata[f"{key}_1_true"][upper]).argmax(dim=-1),
-                    reduction="none",
+                    reduction=reduction,
                 )
-            if key == "e":
-                # apply the weights
-                losses[key] = losses[key] * lw[edge_batch_idx][upper]
-            else:
-                use_lw = lw[node_batch_idx]
-                if key == "x":
-                    use_lw = use_lw.unsqueeze(-1)
-                losses[key] = losses[key] * use_lw
-            losses[key] = losses[key].mean()
+            if self.time_weighted_loss:
+                if key == "e":
+                    # apply the weights
+                    losses[key] = losses[key] * lw[edge_batch_idx][upper]
+                else:
+                    use_lw = lw[node_batch_idx]
+                    if key == "x":
+                        use_lw = use_lw.unsqueeze(-1)
+                    losses[key] = losses[key] * use_lw
+                losses[key] = losses[key].mean()
         return losses
 
     def model_step(self, inp: GraphData) -> dict[str, Tensor]:

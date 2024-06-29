@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+from torch import vmap
+from torch.func import jvp
 import dgl
 import dgl.function as fn
 from typing import Union
@@ -8,6 +10,49 @@ from src.sfm import Manifold, NSimplex
 from .gvp import GVPConv, GVP, _rbf, _norm_no_nan
 from .interpolant_scheduler import InterpolantScheduler
 from src.sfm import manifold_from_name
+
+
+def geodesic(manifold, start_point, end_point):
+    # https://github.com/facebookresearch/riemannian-fm/blob/main/manifm/manifolds/utils.py#L6
+    shooting_tangent_vec = manifold.log_map(start_point, end_point)
+
+    def path(t):
+        """Generate parameterized function for geodesic curve.
+        Parameters
+        ----------
+        t : array-like, shape=[n_points,]
+            Times at which to compute points of the geodesics.
+        """
+        tangent_vecs = torch.einsum("i,...k->...ik", t, shooting_tangent_vec)
+        points_at_time_t = manifold.exp_map(start_point.unsqueeze(-2), tangent_vecs)
+        return points_at_time_t
+
+    return path
+
+
+def compute_target(
+    x_0: torch.Tensor,
+    x_1: torch.Tensor,
+    time: torch.Tensor,
+    manifold,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Computes flow-matching target; returns point and target itself.
+    """
+    with torch.inference_mode(False):
+        def cond_u(x0, x1, t):
+            path = geodesic(manifold, x0, x1)
+            x_t, u_t = jvp(path, (t,), (torch.ones_like(t).to(t),))
+            return x_t, u_t
+        x_t, target = vmap(cond_u)(x_0, x_1, time)
+    x_t = x_t.squeeze()
+    target = target.squeeze()
+    if x_0.size(0) == 1:
+        # squeezing will remove the batch
+        x_t = x_t.unsqueeze(0)
+        target = target.unsqueeze(0)
+    return x_t, target
+
 
 class EndpointVectorField(nn.Module):
 
@@ -240,7 +285,8 @@ class EndpointVectorField(nn.Module):
         
         return x_diff, d
 
-    def integrate(self, g: dgl.DGLGraph, node_batch_idx: torch.Tensor, upper_edge_mask: torch.Tensor, n_timesteps: int, visualize=False):
+    def integrate(self, g: dgl.DGLGraph, node_batch_idx: torch.Tensor, upper_edge_mask: torch.Tensor, n_timesteps: int,
+                  visualize=False, inference_scaling: float | None = None):
         """Integrate the trajectories of molecules along the vector field."""
 
         # get the timepoint for integration
@@ -285,7 +331,7 @@ class EndpointVectorField(nn.Module):
             alpha_t_prime_i = alpha_t_prime[s_idx - 1]
 
             # compute next step and set x_t = x_s
-            g = self.step(g, s_i, t_i, alpha_t_i, alpha_s_i, alpha_t_prime_i, node_batch_idx, upper_edge_mask)
+            g = self.step(g, s_i, t_i, alpha_t_i, alpha_s_i, alpha_t_prime_i, node_batch_idx, upper_edge_mask, inference_scaling=inference_scaling)
 
             if visualize:
                 for feat in self.canonical_feat_order:
@@ -337,7 +383,8 @@ class EndpointVectorField(nn.Module):
     
     def step(self, g: dgl.DGLGraph, s_i: torch.Tensor, t_i: torch.Tensor,
              alpha_t_i: torch.Tensor, alpha_s_i: torch.Tensor, alpha_t_prime_i: torch.Tensor,
-             node_batch_idx: torch.Tensor, upper_edge_mask: torch.Tensor):
+             node_batch_idx: torch.Tensor, upper_edge_mask: torch.Tensor,
+             inference_scaling: float | None = None):
         
         # predict the destination of the trajectory given the current timepoint
         dst_dict = self(
@@ -352,8 +399,8 @@ class EndpointVectorField(nn.Module):
         # compute x_s for each feature and set x_t = x_s
         for feat_idx, feat in enumerate(self.canonical_feat_order):
             x1_weight = alpha_t_prime_i[feat_idx]*(s_i - t_i)/(1 - alpha_t_i[feat_idx])
+            # x1_weight = (s_i - t_i)
             # alpha(t) * dt / (1 - alpha(t))
-            xt_weight = 1 - x1_weight
 
             if feat == "e":
                 g_data_src = g.edata
@@ -367,6 +414,8 @@ class EndpointVectorField(nn.Module):
                 x1 = dst_dict[feat]
 
             # TODO: support for x different manifold?
+            x1_weight = x1_weight * (inference_scaling or 1.0)
+            xt_weight = 1 - x1_weight
             if feat != "x":
                 g_data_src[f'{feat}_t'] = self.features_manifolds[feat].exp_map(
                     g_data_src[f"{feat}_t"],
