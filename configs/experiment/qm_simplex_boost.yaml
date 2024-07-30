@@ -1,0 +1,59 @@
+# @package _global_
+
+# to execute this experiment run:
+# python train.py experiment=example
+
+defaults:
+  - override /data: qm9
+  - override /model: molecule_module
+  - override /callbacks: default
+  - override /trainer: default
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+
+tags: ["qm9", "vecfield"]
+
+seed: 12345
+
+trainer:
+  min_epochs: 500
+  max_epochs: 500
+  gradient_clip_val: 1.0
+
+model:
+  compile: false
+  conditional: false
+  inference_steps: 100
+  features_manifolds:
+    x: euclidean
+    a: simplex
+    c: simplex
+    e: simplex
+  features_priors:
+    x: centered-gaussian
+    a: uniform
+    e: uniform
+    c: uniform
+  loss_weights:
+    x: 1.0
+    a: 1.0
+    c: 1.0
+    e: 1.0
+  atom_type_map: ['C', 'H', 'N', 'O', 'F']
+  eval_mols_every: 1
+  n_eval_mols: 128
+  inference_scaling: 10.0
+  net:
+    n_atom_types: 5
+    features_manifolds: ${model.features_manifolds}
+    interpolant_scheduler: linear
+
+logger:
+  wandb:
+    tags: ${tags}
+    group: "qm9"
+    name: qm9_s${seed}_linear_simplex_unweighted_boosted
+    project: sfm-qm9
+  aim:
+    experiment: "qm9"
