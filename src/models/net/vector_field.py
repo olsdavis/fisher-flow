@@ -414,7 +414,8 @@ class EndpointVectorField(nn.Module):
                 x1 = dst_dict[feat]
 
             # TODO: support for x different manifold?
-            x1_weight = x1_weight * (inference_scaling or 1.0)
+            if feat != "x":
+                x1_weight = x1_weight * (inference_scaling or 1.0)
             xt_weight = 1 - x1_weight
             if feat != "x":
                 g_data_src[f'{feat}_t'] = self.features_manifolds[feat].exp_map(
