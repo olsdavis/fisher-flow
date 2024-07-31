@@ -8,4 +8,4 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=128G
 conda activate sfm
-srun -u python -m src.train experiment=cifar_unet seed=$1 trainer.max_epochs=150 trainer=gpu logger=wandb
+srun -u python -m src.train experiment=$2 seed=$1 trainer.max_epochs=150 trainer=gpu logger=wandb

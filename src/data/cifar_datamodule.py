@@ -37,10 +37,9 @@ class CIFARDataModule(LightningDataModule):
         :return: The discretized tensor.
         """
         x = T.ToTensor()(x)
-        final_shape = (-1,) + x.shape[1:]
         x = (x * 255).long()
         x = F.one_hot(x, num_classes=256).float()
-        return x.reshape(final_shape)
+        return x
 
     def setup(self, stage: str | None = None):
         """Split the dataset into train, validation and test sets.
@@ -99,12 +98,12 @@ class CIFARDataModule(LightningDataModule):
         )
 
     def get_all_test_set(self) -> Tensor:
-        """Get the entire test set.
+        """Get the entire test set, encoded with floats between 0 and 1.
 
         :return: The entire test set.
         """
         assert self.data_test
-        return torch.stack([x.reshape(256, 3, 32, 32).argmax(dim=0).to(torch.uint8) for x, _ in self.data_test])
+        return torch.stack([x.reshape(256, 3, 32, 32).argmax(dim=0).float() / 255.0 for x, _ in self.data_test])
 
     def teardown(self, stage: str | None = None):
         """Lightning hook for cleaning up after `trainer.fit()`, `trainer.validate()`,

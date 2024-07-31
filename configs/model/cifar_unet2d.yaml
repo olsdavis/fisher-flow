@@ -16,6 +16,6 @@ scheduler:
 net:
   _target_: src.models.net.UNet2DModel
   k: 768  # 3 * 256
-  dim: 256
+  dim: 32  # is square root
 
 compile: false
