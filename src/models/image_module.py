@@ -4,7 +4,6 @@ Module for flow models over images.
 from abc import ABC, abstractmethod
 import os
 from lightning import LightningModule
-import tqdm
 import torch
 from torch.func import jvp
 from torch import Tensor, nn, vmap
@@ -158,7 +157,7 @@ class ImageFlowModule(FlowModule):
         ).to(device=self.device)
         x = x_0
         times = torch.linspace(0, 1, self.inference_steps, device=self.device)
-        for t, s in tqdm.tqdm(zip(times[:-1], times[1:])):
+        for t, s in zip(times[:-1], times[1:]):
             # s is the next time step
             dt = s - t
             # euler integration
@@ -189,10 +188,12 @@ class ImageFlowModule(FlowModule):
         return self.fid.compute().detach().item()
 
     def on_validation_epoch_end(self):
+        if self.current_epoch % self.fid_freq != 0 and self.current_epoch != 0:
+            return
         with torch.inference_mode():
             generated = self.generate_image_collection(1000)
             fid = self.compute_fid(
-                real=self.trainer.datamodule.get_all_val_set(),
+                real=self.trainer.datamodule.get_all_test_set(),
                 fake=generated,
             )
             self.log(
