@@ -135,7 +135,7 @@ class MoleculeModule(LightningModule):
         inference_steps: int = 100,
         features_priors: dict[str, str] | None = None,
         loss_weights: dict[str, float] | None = None,
-        eval_mols_every: int = 1,
+        eval_mols_every: int = 5,
         n_eval_mols: int = 128,
         time_weighted_loss: bool = False,
         inference_scaling: float | None = None,
@@ -454,6 +454,12 @@ class MoleculeModule(LightningModule):
 
     def on_test_epoch_end(self):
         """Lightning hook that is called when a test epoch ends."""
+
+        molecules = self.sample_random_sizes(10000, n_timesteps=self.inference_steps)
+        analyzer = SampleAnalyzer()
+        stats = analyzer.analyze(molecules)
+        for key, value in stats.items():
+            self.log(f"test/{key}", value, on_step=False, on_epoch=True, prog_bar=False)
 
     def setup(self, stage: str):
         """Lightning hook that is called at the beginning of fit (train + validate), validate,
