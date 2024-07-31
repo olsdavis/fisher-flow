@@ -1,4 +1,4 @@
 _target_: src.data.CIFARDataModule
 batch_size: 256  # Needs to be divisible by the number of devices (e.g., if in a distributed setup)
 num_workers: 32
-pin_memory: True
+pin_memory: false
