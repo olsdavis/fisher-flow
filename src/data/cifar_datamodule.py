@@ -49,8 +49,7 @@ class CIFARDataModule(LightningDataModule):
         """
         self.data_train = CIFAR10(self.hparams.data_dir, train=True, transform=self._discretize_transform)
         self.data_val = CIFAR10(self.hparams.data_dir, train=False, transform=self._discretize_transform)
-        if stage == "test":
-            self.data_test = CIFAR10(self.hparams.data_dir, train=False, transform=self._discretize_transform)
+        self.data_test = CIFAR10(self.hparams.data_dir, train=False, transform=self._discretize_transform)
         if self.trainer is not None:
             if self.hparams.batch_size % self.trainer.world_size != 0:
                 raise RuntimeError(
