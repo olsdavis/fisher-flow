@@ -114,6 +114,7 @@ class ImageFlowModule(FlowModule):
     def on_fit_start(self):
         # update once
         print("Update FID with real data...")
+
         for x, _ in tqdm.tqdm(self.trainer.datamodule.test_dataloader()):
             self.fid.update(
                 x.to(self.device),
@@ -167,8 +168,8 @@ class ImageFlowModule(FlowModule):
         x = self.image_to_one_hot_float(x)
         b, c, h, w, bits = x.shape
         # sample noise
-        x_0 = self.manifold.uniform_prior(b, h * w * c, bits, device=self.device)
-        x_1 = x.reshape(b, h * w * c, bits)
+        x_0 = self.manifold.uniform_prior(b, c * h * w, bits, device=self.device)
+        x_1 = x.reshape(b, c * h * w, bits)
         x_0 = x_1
         t = torch.rand(b, 1, device=self.device)
 
@@ -177,7 +178,7 @@ class ImageFlowModule(FlowModule):
             t = self.time_schedule.alpha(t)
             x_t = self.manifold.geodesic_interpolant(x_0, x_1, t)
             # x_t = x_t.reshape(b, c, h, w, bits).permute(0, 1, 4, 2, 3).reshape(b, c * bits, h, w)
-            x_t = rearrange(x_t, "b (h w c) k -> b (c k) h w", h=h, w=w, c=c, b=b, k=bits)
+            x_t = rearrange(x_t, "b (c h w) k -> b (c k) h w", h=h, w=w, c=c, b=b, k=bits)
             out = self.net(x_t, t)
             loss = F.cross_entropy(
                 # out.reshape(b, c, bits, h, w).permute(0, 2, 1, 3, 4),
@@ -189,9 +190,9 @@ class ImageFlowModule(FlowModule):
             # loss for vectors
             x_t, target = self.compute_target(x_0, x_1, t)
             # out = self.net(x_t.reshape(b, h, w, c * bits).permute(0, 3, 1, 2), t)
-            x_t = rearrange(x_t, "b (h w c) k -> b (c k) h w", h=h, w=w, c=c, b=b, k=bits)
+            x_t = rearrange(x_t, "b (c h w) k -> b (c k) h w", h=h, w=w, c=c, b=b, k=bits)
             out = self.net(x_t, t)
-            out = rearrange(out, "b (c k) h w -> b (h w c) k", h=h, w=w, c=c, b=b, k=bits)
+            out = rearrange(out, "b (c k) h w -> b (c h w) k", h=h, w=w, c=c, b=b, k=bits)
             # out = out.reshape(b, c, bits, h, w).permute(0, 1, 3, 4, 2).reshape(b, h * w * c, bits)
             loss = F.mse_loss(out, target, reduction="mean")
         return loss
@@ -203,13 +204,12 @@ class ImageFlowModule(FlowModule):
         c = 3
         bits = 256
 
-        manifold_shape = (batch_size, h * w * c, bits)
+        manifold_shape = (batch_size, c * h * w, bits)
         x_0 = self.manifold.uniform_prior(
             *manifold_shape, device=self.device,
         )
         x = x_0
         times = torch.linspace(0, 1, self.inference_steps, device=self.device)
-
         for t, s in zip(times[:-1], times[1:]):
             # s is the next time step
             dt = s - t
@@ -217,18 +217,18 @@ class ImageFlowModule(FlowModule):
             x_prev = x
             # x = x.reshape(batch_size, h, w, c, bits).permute(0, 3, 4, 1, 2)
             # x = x.reshape(batch_size, c * bits, h, w)
-            x = rearrange(x, "b (h w c) k -> b (c k) h w", h=h, w=w, c=c, b=batch_size, k=bits)
+            x = rearrange(x, "b (c h w) k -> b (c k) h w", h=h, w=w, c=c, b=batch_size, k=bits)
             # through model
             out = self.net(x, t)
             # now, prepare step
             # out = out.reshape(batch_size, c, bits, h, w).permute(0, 1, 3, 4, 2).softmax(dim=-1)
             # out = out.reshape(batch_size, h * w * c, bits)
-            out = rearrange(out, "b (c k) h w -> b (h w c) k", h=h, w=w, c=c, b=batch_size, k=bits)
+            out = rearrange(out, "b (c k) h w -> b (c h w) k", h=h, w=w, c=c, b=batch_size, k=bits)
             if self.x1_pred:
                 vec = self.manifold.log_map(
                     x_prev,
                     NSimplex().send_to(
-                        out,
+                        out.softmax(dim=-1),
                         type(self.manifold),
                     ),
                 )
