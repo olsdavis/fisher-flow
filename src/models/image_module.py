@@ -101,7 +101,7 @@ class ImageFlowModule(FlowModule):
 
     def __init__(
         self,
-        fid_freq: int = 1,
+        fid_freq: int = 5,
         x1_pred: bool = False,
         **kwargs,
     ):
