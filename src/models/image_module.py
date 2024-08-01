@@ -13,28 +13,9 @@ from torch.nn import functional as F
 from torchmetrics import MeanMetric
 from torchmetrics.image import FrechetInceptionDistance as FID
 from torchvision.utils import make_grid
-from torchvision import transforms as T
+from torchvision.transforms import ToPILImage
 from einops import rearrange
-from src.sfm import NSimplex, manifold_from_name
-from torch.profiler import profile, ProfilerActivity
-
-
-def geodesic(manifold, start_point, end_point):
-    # https://github.com/facebookresearch/riemannian-fm/blob/main/manifm/manifolds/utils.py#L6
-    shooting_tangent_vec = manifold.logmap(start_point, end_point)
-
-    def path(t):
-        """Generate parameterized function for geodesic curve.
-        Parameters
-        ----------
-        t : array-like, shape=[n_points,]
-            Times at which to compute points of the geodesics.
-        """
-        tangent_vecs = torch.einsum("i,...k->...ik", t, shooting_tangent_vec)
-        points_at_time_t = manifold.expmap(start_point.unsqueeze(-2), tangent_vecs)
-        return points_at_time_t
-
-    return path
+from src.sfm import NSimplex, manifold_from_name, time_schedule_from_name
 
 
 class FlowModule(ABC, LightningModule):
@@ -52,9 +33,11 @@ class FlowModule(ABC, LightningModule):
         fast_matmul: bool = True,
         manifold: str = "simplex",
         inference_steps: int = 100,
+        time_schedule: str = "linear",
     ):
         super().__init__()
         self.save_hyperparameters(logger=False, ignore=["net", "fid"])
+        self.time_schedule = time_schedule_from_name(time_schedule)
         self.fid = FID(feature=2048, normalize=True, reset_real_features=False)
         self.fid = self.fid.to(self.device)
         self.net = net
@@ -118,7 +101,7 @@ class ImageFlowModule(FlowModule):
 
     def __init__(
         self,
-        fid_freq: int = 10,
+        fid_freq: int = 1,
         x1_pred: bool = False,
         **kwargs,
     ):
@@ -131,19 +114,33 @@ class ImageFlowModule(FlowModule):
     def on_fit_start(self):
         # update once
         print("Update FID with real data...")
-        with profile(activities=[ProfilerActivity.CPU], profile_memory=True, record_shapes=True) as prof:
-            for x, _ in tqdm.tqdm(self.trainer.datamodule.test_dataloader()):
-                self.fid.update(
-                    x.to(self.device),
-                    real=True,
-                )
-        print(prof.key_averages().table(sort_by="self_cpu_memory_usage", row_limit=10))
+        for x, _ in tqdm.tqdm(self.trainer.datamodule.test_dataloader()):
+            self.fid.update(
+                x.to(self.device),
+                real=True,
+            )
+
+    def geodesic(self, manifold, start_point, end_point):
+        # https://github.com/facebookresearch/riemannian-fm/blob/main/manifm/manifolds/utils.py#L6
+        shooting_tangent_vec = manifold.logmap(start_point, end_point)
+
+        def path(t):
+            """Generate parameterized function for geodesic curve.
+            Parameters
+            ----------
+            t : array-like, shape=[n_points,]
+                Times at which to compute points of the geodesics.
+            """
+            tangent_vecs = torch.einsum("i,...k->...ik", self.time_schedule.alpha(t), shooting_tangent_vec)
+            points_at_time_t = manifold.expmap(start_point.unsqueeze(-2), tangent_vecs)
+            return points_at_time_t
+        return path
 
     def compute_target(self, x_0: Tensor, x_1: Tensor, time: Tensor, approx: bool = False) -> tuple[Tensor, Tensor]:
         if approx:
             with torch.inference_mode(False):
                 def cond_u(x0, x1, t):
-                    path = geodesic(self.manifold.sphere, x0, x1)
+                    path = self.geodesic(self.manifold.sphere, x0, x1)
                     x_t, u_t = jvp(path, (t,), (torch.ones_like(t).to(t),))
                     return x_t, u_t
                 x_t, target = vmap(cond_u)(x_0, x_1, time)
@@ -152,7 +149,8 @@ class ImageFlowModule(FlowModule):
             return x_t, target
         # closed form stuff
         x_t = self.manifold.geodesic_interpolant(x_0, x_1, time)
-        target = self.manifold.log_map(x_0, x_1) / (1.0 - time[..., None] + 1e-8)
+        coeff = self.time_schedule.alpha_prime(time) / (1.0 - self.time_schedule.alpha(time) + 1e-8)
+        target = coeff[..., None] * self.manifold.log_map(x_0, x_1)
         target = self.manifold.parallel_transport(x_0, x_t, target)
         return x_t, target
 
@@ -176,6 +174,7 @@ class ImageFlowModule(FlowModule):
 
         # loss for x_1 pred mode
         if self.x1_pred:
+            t = self.time_schedule.alpha(t)
             x_t = self.manifold.geodesic_interpolant(x_0, x_1, t)
             # x_t = x_t.reshape(b, c, h, w, bits).permute(0, 1, 4, 2, 3).reshape(b, c * bits, h, w)
             x_t = rearrange(x_t, "b (h w c) k -> b (c k) h w", h=h, w=w, c=c, b=b, k=bits)
@@ -233,6 +232,7 @@ class ImageFlowModule(FlowModule):
                         type(self.manifold),
                     ),
                 )
+                dt *= self.time_schedule.alpha_prime(t) / (1.0 - self.time_schedule.alpha(t) + 1e-8)
             else:
                 vec = out
             x = self.manifold.exp_map(x_prev, vec * dt)
@@ -265,8 +265,10 @@ class ImageFlowModule(FlowModule):
     def log_images(self, images: Tensor, logs_folder: str, rows: int = 8, cols: int = 8):
         with torch.inference_mode():
             final_images = np.random.choice(images.shape[0], rows * cols, replace=False)
-            grid = make_grid(final_images, nrow=rows)
-            self.log(f"{logs_folder}/example_images", grid, on_step=False, on_epoch=True)
+            grid = make_grid(images[final_images], nrow=rows)
+            self.logger.log_image(
+                key=f"{logs_folder}/example_images", images=[ToPILImage()(grid)],
+            )
 
     def on_validation_epoch_end(self):
         if self.current_epoch % self.fid_freq != 0 or self.current_epoch == 0:
@@ -283,10 +285,9 @@ class ImageFlowModule(FlowModule):
             )
             self.log_images(generated, f"val_{self.current_epoch:03d}")
 
-    def on_test_epoch_end(self):
-        os.makedirs(name="./final_fid", exist_ok=True)
+    def on_test_epoch_start(self):
         with torch.inference_mode():
-            generated = self.generate_image_collection()
+            generated = self.generate_image_collection(100)
             fid = self.compute_fid(
                 fake=generated,
             )
