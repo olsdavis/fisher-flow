@@ -1,3 +1,5 @@
+import gc
+import os
 from typing import Any
 from torchvision import transforms as T
 from torchvision.datasets import CIFAR10
@@ -24,11 +26,22 @@ class CIFARDataModule(LightningDataModule):
     ):
         super().__init__()
         self.save_hyperparameters(logger=False)
+        self.pre_processed_train = f"{data_dir}/proc_train.pt"
+        self.pre_processed_val = f"{data_dir}/proc_val.pt"
 
     def prepare_data(self) -> None:
         """Download dataset."""
         CIFAR10(self.hparams.data_dir, train=True, download=True)
         CIFAR10(self.hparams.data_dir, train=False, download=True)
+        if not os.path.exists(self.pre_processed_train):
+            dt = CIFAR10(self.hparams.data_dir, train=True, transform=self._discretize_transform)
+            torch.save(dt, self.pre_processed_train)
+            del dt
+        if not os.path.exists(self.pre_processed_val):
+            dt = CIFAR10(self.hparams.data_dir, train=False, transform=self._discretize_transform)
+            torch.save(dt, self.pre_processed_val)
+            del dt
+        gc.collect()
 
     def _discretize_transform(self, x: Any) -> Tensor:
         """Discretize the input tensor.
@@ -46,9 +59,9 @@ class CIFARDataModule(LightningDataModule):
 
         :param stage: The stage being setup. Either `"fit"`, `"validate"`, `"test"`, or `None`.
         """
-        self.data_train = CIFAR10(self.hparams.data_dir, train=True, transform=self._discretize_transform)
-        self.data_val = CIFAR10(self.hparams.data_dir, train=False, transform=self._discretize_transform)
-        self.data_test = CIFAR10(self.hparams.data_dir, train=False, transform=self._discretize_transform)
+        self.data_train = torch.load(self.pre_processed_train)
+        self.data_val = torch.load(self.pre_processed_val)
+        self.data_test = self.data_val
         if self.trainer is not None:
             if self.hparams.batch_size % self.trainer.world_size != 0:
                 raise RuntimeError(

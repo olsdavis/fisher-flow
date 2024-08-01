@@ -12,6 +12,7 @@ from torch.nn import functional as F
 from torchmetrics import MeanMetric
 from torchmetrics.image import FrechetInceptionDistance as FID
 from torchvision.utils import make_grid
+from einops import rearrange
 from src.sfm import NSimplex, manifold_from_name
 
 
@@ -150,18 +151,23 @@ class ImageFlowModule(FlowModule):
         # loss for x_1 pred mode
         if self.x1_pred:
             x_t = self.manifold.geodesic_interpolant(x_0, x_1, t)
-            x_t = x_t.reshape(b, c, h, w, bits).permute(0, 1, 4, 2, 3).reshape(b, c * bits, h, w)
+            # x_t = x_t.reshape(b, c, h, w, bits).permute(0, 1, 4, 2, 3).reshape(b, c * bits, h, w)
+            x_t = rearrange(x_t, "b (h w c) k -> b (c k) h w", h=h, w=w, c=c, b=b, k=bits)
             out = self.net(x_t, t)
             return F.cross_entropy(
-                out.reshape(b, c, bits, h, w).permute(0, 2, 1, 3, 4),
+                # out.reshape(b, c, bits, h, w).permute(0, 2, 1, 3, 4),
+                rearrange(out, "b (c k) h w -> b k c h w", h=h, w=w, c=c, b=b, k=bits),
                 x.permute(0, 1, 4, 2, 3).argmax(dim=2),
                 reduction="mean",
             )
 
         # loss for vectors
         x_t, target = self.compute_target(x_0, x_1, t)
-        out = self.net(x_t.reshape(b, h, w, c * bits).permute(0, 3, 1, 2), t)
-        out = out.reshape(b, c, bits, h, w).permute(0, 1, 3, 4, 2).reshape(b, h * w * c, bits)
+        # out = self.net(x_t.reshape(b, h, w, c * bits).permute(0, 3, 1, 2), t)
+        x_t = rearrange(x_t, "b (h w c) k -> b (c k) h w", h=h, w=w, c=c, b=b, k=bits)
+        out = self.net(x_t, t)
+        out = rearrange(out, "b (c k) h w -> b (h w c) k", h=h, w=w, c=c, b=b, k=bits)
+        # out = out.reshape(b, c, bits, h, w).permute(0, 1, 3, 4, 2).reshape(b, h * w * c, bits)
         loss = F.mse_loss(out, target, reduction="mean")
         return loss
 
