@@ -267,7 +267,7 @@ class ImageFlowModule(FlowModule):
             final_images = np.random.choice(images.shape[0], rows * cols, replace=False)
             grid = make_grid(images[final_images], nrow=rows)
             self.logger.log_image(
-                key=f"{logs_folder}/example_images", images=[ToPILImage()(grid)],
+                key=f"example_images/{logs_folder}", images=[ToPILImage()(grid)],
             )
 
     def on_validation_epoch_end(self):
