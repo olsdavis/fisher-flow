@@ -643,17 +643,21 @@ class UNet2DModel(nn.Module):
         k: int,
         dim: int,
         activation: str = "silu",
+        filters: int = 64,
+        depth: int = 2,
+        groups_norm: int = 8,
     ):
         super().__init__()
+        channels = (filters,) * depth
         self.diffusers_unet = self.DiffusersUNet(
             sample_size=dim,
             in_channels=k,
             out_channels=k,
-            block_out_channels=(64, 64,),
-            down_block_types=("DownBlock2D", "AttnDownBlock2D"),
-            up_block_types=("AttnUpBlock2D", "UpBlock2D"),
+            block_out_channels=channels,
+            down_block_types=("DownBlock2D", "AttnDownBlock2D") + ("DownBlock2D",) * (depth - 2),
+            up_block_types=("AttnUpBlock2D", "UpBlock2D") + ("UpBlock2D",) * (depth - 2),
             act_fn=activation,
-            norm_num_groups=8,
+            norm_num_groups=groups_norm,
         )
 
     def forward(self, x: Tensor, t: Tensor) -> Tensor:

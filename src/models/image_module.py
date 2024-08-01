@@ -3,6 +3,7 @@ Module for flow models over images.
 """
 from abc import ABC, abstractmethod
 import os
+import tqdm
 import numpy as np
 from lightning import LightningModule
 import torch
@@ -12,8 +13,10 @@ from torch.nn import functional as F
 from torchmetrics import MeanMetric
 from torchmetrics.image import FrechetInceptionDistance as FID
 from torchvision.utils import make_grid
+from torchvision import transforms as T
 from einops import rearrange
 from src.sfm import NSimplex, manifold_from_name
+from torch.profiler import profile, ProfilerActivity
 
 
 def geodesic(manifold, start_point, end_point):
@@ -52,7 +55,7 @@ class FlowModule(ABC, LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters(logger=False, ignore=["net", "fid"])
-        self.fid = FID(feature=2048, normalize=True)
+        self.fid = FID(feature=2048, normalize=True, reset_real_features=False)
         self.fid = self.fid.to(self.device)
         self.net = net
         self.x1_pred = x1_pred
@@ -125,16 +128,37 @@ class ImageFlowModule(FlowModule):
         self.fid_freq = fid_freq
         self.x1_pred = x1_pred
 
-    def compute_target(self, x_0: Tensor, x_1: Tensor, time: Tensor) -> tuple[Tensor, Tensor]:
-        with torch.inference_mode(False):
-            def cond_u(x0, x1, t):
-                path = geodesic(self.manifold.sphere, x0, x1)
-                x_t, u_t = jvp(path, (t,), (torch.ones_like(t).to(t),))
-                return x_t, u_t
-            x_t, target = vmap(cond_u)(x_0, x_1, time)
-        x_t = x_t.squeeze()
-        target = target.squeeze()
+    def on_fit_start(self):
+        # update once
+        print("Update FID with real data...")
+        with profile(activities=[ProfilerActivity.CPU], profile_memory=True, record_shapes=True) as prof:
+            for x, _ in tqdm.tqdm(self.trainer.datamodule.test_dataloader()):
+                self.fid.update(
+                    x.to(self.device),
+                    real=True,
+                )
+        print(prof.key_averages().table(sort_by="self_cpu_memory_usage", row_limit=10))
+
+    def compute_target(self, x_0: Tensor, x_1: Tensor, time: Tensor, approx: bool = False) -> tuple[Tensor, Tensor]:
+        if approx:
+            with torch.inference_mode(False):
+                def cond_u(x0, x1, t):
+                    path = geodesic(self.manifold.sphere, x0, x1)
+                    x_t, u_t = jvp(path, (t,), (torch.ones_like(t).to(t),))
+                    return x_t, u_t
+                x_t, target = vmap(cond_u)(x_0, x_1, time)
+            x_t = x_t.squeeze()
+            target = target.squeeze()
+            return x_t, target
+        # closed form stuff
+        x_t = self.manifold.geodesic_interpolant(x_0, x_1, time)
+        target = self.manifold.log_map(x_0, x_1) / (1.0 - time[..., None] + 1e-8)
+        target = self.manifold.parallel_transport(x_0, x_t, target)
         return x_t, target
+
+    @torch.inference_mode()
+    def image_to_one_hot_float(self, x: Tensor) -> Tensor:
+        return F.one_hot(x.long(), num_classes=256).float()
 
     def forward(self, x: Tensor | list[Tensor]) -> Tensor:
         if isinstance(x, list):
@@ -142,10 +166,12 @@ class ImageFlowModule(FlowModule):
             x = x[0]
 
         # B, C, H, W, bits is x_0
+        x = self.image_to_one_hot_float(x)
         b, c, h, w, bits = x.shape
         # sample noise
-        x_0 = self.manifold.uniform_prior(b, h * w * c, bits).to(device=self.device)
+        x_0 = self.manifold.uniform_prior(b, h * w * c, bits, device=self.device)
         x_1 = x.reshape(b, h * w * c, bits)
+        x_0 = x_1
         t = torch.rand(b, 1, device=self.device)
 
         # loss for x_1 pred mode
@@ -154,21 +180,21 @@ class ImageFlowModule(FlowModule):
             # x_t = x_t.reshape(b, c, h, w, bits).permute(0, 1, 4, 2, 3).reshape(b, c * bits, h, w)
             x_t = rearrange(x_t, "b (h w c) k -> b (c k) h w", h=h, w=w, c=c, b=b, k=bits)
             out = self.net(x_t, t)
-            return F.cross_entropy(
+            loss = F.cross_entropy(
                 # out.reshape(b, c, bits, h, w).permute(0, 2, 1, 3, 4),
                 rearrange(out, "b (c k) h w -> b k c h w", h=h, w=w, c=c, b=b, k=bits),
                 x.permute(0, 1, 4, 2, 3).argmax(dim=2),
                 reduction="mean",
             )
-
-        # loss for vectors
-        x_t, target = self.compute_target(x_0, x_1, t)
-        # out = self.net(x_t.reshape(b, h, w, c * bits).permute(0, 3, 1, 2), t)
-        x_t = rearrange(x_t, "b (h w c) k -> b (c k) h w", h=h, w=w, c=c, b=b, k=bits)
-        out = self.net(x_t, t)
-        out = rearrange(out, "b (c k) h w -> b (h w c) k", h=h, w=w, c=c, b=b, k=bits)
-        # out = out.reshape(b, c, bits, h, w).permute(0, 1, 3, 4, 2).reshape(b, h * w * c, bits)
-        loss = F.mse_loss(out, target, reduction="mean")
+        else:
+            # loss for vectors
+            x_t, target = self.compute_target(x_0, x_1, t)
+            # out = self.net(x_t.reshape(b, h, w, c * bits).permute(0, 3, 1, 2), t)
+            x_t = rearrange(x_t, "b (h w c) k -> b (c k) h w", h=h, w=w, c=c, b=b, k=bits)
+            out = self.net(x_t, t)
+            out = rearrange(out, "b (c k) h w -> b (h w c) k", h=h, w=w, c=c, b=b, k=bits)
+            # out = out.reshape(b, c, bits, h, w).permute(0, 1, 3, 4, 2).reshape(b, h * w * c, bits)
+            loss = F.mse_loss(out, target, reduction="mean")
         return loss
 
     @torch.inference_mode()
@@ -180,8 +206,8 @@ class ImageFlowModule(FlowModule):
 
         manifold_shape = (batch_size, h * w * c, bits)
         x_0 = self.manifold.uniform_prior(
-            *manifold_shape
-        ).to(device=self.device)
+            *manifold_shape, device=self.device,
+        )
         x = x_0
         times = torch.linspace(0, 1, self.inference_steps, device=self.device)
 
@@ -190,14 +216,16 @@ class ImageFlowModule(FlowModule):
             dt = s - t
             # prepare x's shape
             x_prev = x
-            x = x.reshape(batch_size, h, w, c, bits).permute(0, 3, 4, 1, 2)
-            x = x.reshape(batch_size, c * bits, h, w)
+            # x = x.reshape(batch_size, h, w, c, bits).permute(0, 3, 4, 1, 2)
+            # x = x.reshape(batch_size, c * bits, h, w)
+            x = rearrange(x, "b (h w c) k -> b (c k) h w", h=h, w=w, c=c, b=batch_size, k=bits)
             # through model
             out = self.net(x, t)
             # now, prepare step
+            # out = out.reshape(batch_size, c, bits, h, w).permute(0, 1, 3, 4, 2).softmax(dim=-1)
+            # out = out.reshape(batch_size, h * w * c, bits)
+            out = rearrange(out, "b (c k) h w -> b (h w c) k", h=h, w=w, c=c, b=batch_size, k=bits)
             if self.x1_pred:
-                out = out.reshape(batch_size, c, bits, h, w).permute(0, 1, 3, 4, 2).softmax(dim=-1)
-                out = out.reshape(batch_size, h * w * c, bits)
                 vec = self.manifold.log_map(
                     x_prev,
                     NSimplex().send_to(
@@ -206,9 +234,7 @@ class ImageFlowModule(FlowModule):
                     ),
                 )
             else:
-                # TODO: make tangent!!
-                vec = out.reshape(batch_size, c, bits, h, w).permute(0, 1, 3, 4, 2)\
-                    .reshape(batch_size, h * w * c, bits)
+                vec = out
             x = self.manifold.exp_map(x_prev, vec * dt)
 
         # argmax the colours
@@ -226,14 +252,12 @@ class ImageFlowModule(FlowModule):
         return torch.cat(images, dim=0)
 
     @torch.inference_mode()
-    def compute_fid(self, real: Tensor, fake: Tensor, stride: int = 256) -> Tensor:
+    def compute_fid(self, fake: Tensor, stride: int = 256) -> Tensor:
         """
-        Computes the FID between the real images, `real`, and the generated ones,
+        Computes the FID between the real images and the generated ones,
         `fake`. Updates the FID metric `stride` images at a time.
         """
         self.fid.reset()
-        for i in range(0, len(real), stride):
-            self.fid.update(real[i:min(i+stride, real.shape[0])].to(self.fid.device), real=True)
         for i in range(0, len(fake), stride):
             self.fid.update(fake[i:min(i+stride, fake.shape[0])], real=False)
         return self.fid.compute().detach().item()
@@ -250,7 +274,6 @@ class ImageFlowModule(FlowModule):
         with torch.inference_mode():
             generated = self.generate_image_collection(1000)
             fid = self.compute_fid(
-                real=self.trainer.datamodule.get_all_test_set(),
                 fake=generated,
             )
             self.log(
@@ -265,7 +288,6 @@ class ImageFlowModule(FlowModule):
         with torch.inference_mode():
             generated = self.generate_image_collection()
             fid = self.compute_fid(
-                real=self.trainer.datamodule.get_all_test_set(),
                 fake=generated,
             )
             self.log(

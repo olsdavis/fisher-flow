@@ -16,9 +16,8 @@ class CIFARDataModule(LightningDataModule):
     """
 
     def __init__(
-        self, 
+        self,
         data_dir: str = "data/cifar10",
-        one_hot: bool = True,
         train_val_test_split: tuple[int, int, int] = (55_000, 5_000, 10_000),
         batch_size: int = 64,
         num_workers: int = 0,
@@ -26,41 +25,19 @@ class CIFARDataModule(LightningDataModule):
     ):
         super().__init__()
         self.save_hyperparameters(logger=False)
-        self.pre_processed_train = f"{data_dir}/proc_train.pt"
-        self.pre_processed_val = f"{data_dir}/proc_val.pt"
 
     def prepare_data(self) -> None:
         """Download dataset."""
         CIFAR10(self.hparams.data_dir, train=True, download=True)
-        CIFAR10(self.hparams.data_dir, train=False, download=True)
-        if not os.path.exists(self.pre_processed_train):
-            dt = CIFAR10(self.hparams.data_dir, train=True, transform=self._discretize_transform)
-            torch.save(dt, self.pre_processed_train)
-            del dt
-        if not os.path.exists(self.pre_processed_val):
-            dt = CIFAR10(self.hparams.data_dir, train=False, transform=self._discretize_transform)
-            torch.save(dt, self.pre_processed_val)
-            del dt
-        gc.collect()
-
-    def _discretize_transform(self, x: Any) -> Tensor:
-        """Discretize the input tensor.
-
-        :param x: The input tensor.
-        :return: The discretized tensor.
-        """
-        x = T.ToTensor()(x)
-        x = (x * 255).long()
-        x = F.one_hot(x, num_classes=256).float()
-        return x
+        CIFAR10(self.hparams.data_dir, train=False, download=False)
 
     def setup(self, stage: str | None = None):
         """Split the dataset into train, validation and test sets.
 
         :param stage: The stage being setup. Either `"fit"`, `"validate"`, `"test"`, or `None`.
         """
-        self.data_train = torch.load(self.pre_processed_train)
-        self.data_val = torch.load(self.pre_processed_val)
+        self.data_train = CIFAR10(self.hparams.data_dir, train=True, transform=T.ToTensor())
+        self.data_val = CIFAR10(self.hparams.data_dir, train=False, transform=T.ToTensor())
         self.data_test = self.data_val
         if self.trainer is not None:
             if self.hparams.batch_size % self.trainer.world_size != 0:
@@ -109,14 +86,6 @@ class CIFARDataModule(LightningDataModule):
             pin_memory=self.hparams.pin_memory,
             shuffle=False,
         )
-
-    def get_all_test_set(self) -> Tensor:
-        """Get the entire test set, encoded with floats between 0 and 1.
-
-        :return: The entire test set.
-        """
-        assert self.data_test
-        return torch.stack([x.reshape(256, 3, 32, 32).argmax(dim=0).float() / 255.0 for x, _ in self.data_test])
 
     def teardown(self, stage: str | None = None):
         """Lightning hook for cleaning up after `trainer.fit()`, `trainer.validate()`,
