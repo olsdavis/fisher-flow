@@ -15,7 +15,29 @@ from torchmetrics.image import FrechetInceptionDistance as FID
 from torchvision.utils import make_grid
 from torchvision.transforms import ToPILImage
 from einops import rearrange
-from src.sfm import NSimplex, manifold_from_name, time_schedule_from_name
+from src.sfm import Manifold, NSimplex, manifold_from_name, time_schedule_from_name
+
+
+class TangentWrapper(nn.Module):
+    def __init__(self, wrapped: nn.Module, manifold: Manifold):
+        super().__init__()
+        self.wrapped = wrapped
+        self.manifold = manifold
+
+    def forward(self, x: Tensor, t: Tensor):
+        out = self.wrapped(x, t)
+        b, cbits, h, w = x.shape
+        c = 3
+        bits = cbits // c
+
+        out = rearrange(out, "b (c k) h w -> b (c h w) k", b=b, h=h, w=w, c=c, k=bits)
+        tangent = self.manifold.make_tangent(
+            rearrange(x, "b (c k) h w -> b (c h w) k", b=b, h=h, w=w, c=c, k=bits),
+            out,
+            missing_coordinate=False,
+        )
+
+        return rearrange(tangent, "b (c h w) k -> b (c k) h w", h=h, w=w, c=c, b=b, k=bits)
 
 
 class FlowModule(ABC, LightningModule):
@@ -40,13 +62,14 @@ class FlowModule(ABC, LightningModule):
         self.time_schedule = time_schedule_from_name(time_schedule)
         self.fid = FID(feature=2048, normalize=True, reset_real_features=False)
         self.fid = self.fid.to(self.device)
-        self.net = net
         self.x1_pred = x1_pred
         self.total_train_loss = MeanMetric()
         self.total_val_loss = MeanMetric()
         self.total_test_loss = MeanMetric()
         self.manifold = manifold_from_name(manifold)
         self.inference_steps = inference_steps
+        if not x1_pred:
+            self.net = TangentWrapper(net, self.manifold)
         if fast_matmul:
             torch.set_float32_matmul_precision("high")
 
@@ -266,12 +289,16 @@ class ImageFlowModule(FlowModule):
         with torch.inference_mode():
             final_images = np.random.choice(images.shape[0], rows * cols, replace=False)
             grid = make_grid(images[final_images], nrow=rows)
-            self.logger.log_image(
-                key=f"example_images/{logs_folder}", images=[ToPILImage()(grid)],
-            )
+            if self.logger is None:
+                image = ToPILImage()(grid)
+                image.save(f"./log_{self.current_epoch:03d}.png")
+            else:
+                self.logger.log_image(
+                    key=f"example_images/{logs_folder}", images=[ToPILImage()(grid)],
+                )
 
     def on_validation_epoch_end(self):
-        if self.current_epoch % self.fid_freq != 0 or self.current_epoch == 0:
+        if self.current_epoch % self.fid_freq != 0:
             return
         with torch.inference_mode():
             generated = self.generate_image_collection(1000)
@@ -287,7 +314,7 @@ class ImageFlowModule(FlowModule):
 
     def on_test_epoch_start(self):
         with torch.inference_mode():
-            generated = self.generate_image_collection(100)
+            generated = self.generate_image_collection(10000)
             fid = self.compute_fid(
                 fake=generated,
             )

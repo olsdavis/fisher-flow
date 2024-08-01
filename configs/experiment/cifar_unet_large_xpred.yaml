@@ -16,6 +16,9 @@ tags: ["cifar", "unet", "x1_pred"]
 
 seed: 12345
 
+data:
+  batch_size: 512
+
 trainer:
   min_epochs: 1
   max_epochs: 100
@@ -24,6 +27,11 @@ trainer:
 model:
   optimizer:
     lr: 0.0001
+  net:
+    depth: 4
+    filters: 256
+    groups_norm: 64
+    activation: swish
   compile: false
   manifold: sphere
   inference_steps: 250
