@@ -20,8 +20,8 @@ data:
   batch_size: 512
 
 trainer:
-  min_epochs: 1
-  max_epochs: 150
+  min_epochs: 250
+  max_epochs: 250
   gradient_clip_val: 1.0
 
 model:
