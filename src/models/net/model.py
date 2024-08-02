@@ -664,6 +664,37 @@ class UNet2DModel(nn.Module):
         return self.diffusers_unet(x, t.squeeze(), return_dict=False)[0]
 
 
+class MegaUNet2DModel(nn.Module):
+    """
+    Adaptation of diffusers UNet2D.
+    """
+    from diffusers.models import UNet2DModel as DiffusersUNet
+
+    def __init__(
+        self,
+        k: int,
+        dim: int,
+        activation: str = "silu",
+        filters: int = 128,
+        depth: int = 4,
+        groups_norm: int = 64,
+    ):
+        super().__init__()
+        channels = tuple(filters // (2 ** (depth - i - 1)) for i in range(depth))
+        self.diffusers_unet = self.DiffusersUNet(
+            sample_size=dim,
+            in_channels=k,
+            out_channels=k,
+            layers_per_block=4,
+            block_out_channels=channels,
+            act_fn=activation,
+            norm_num_groups=groups_norm,
+        )
+
+    def forward(self, x: Tensor, t: Tensor) -> Tensor:
+        return self.diffusers_unet(x, t.squeeze(), return_dict=False)[0]
+
+
 class SimpleSineEmbedding(nn.Module):
     def __init__(self, emb_size: int):
         super().__init__()

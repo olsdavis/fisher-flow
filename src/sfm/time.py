@@ -42,10 +42,34 @@ class QuadraticSchedule(TimeSchedule):
     """
 
     def alpha(self, t: Tensor) -> Tensor:
-        return t ** 2
+        return t.square()
 
     def alpha_prime(self, t: Tensor) -> Tensor:
-        return 2 * t
+        return 2.0 * t
+
+
+class SqrtSchedule(TimeSchedule):
+    """
+    `alpha(t) = sqrt(t)` schedule.
+    """
+
+    def alpha(self, t: Tensor) -> Tensor:
+        return t.sqrt()
+
+    def alpha_prime(self, t: Tensor) -> Tensor:
+        return 0.5 * (t + 1e-7).pow(-0.5)
+
+
+class SineSchedule(TimeSchedule):
+    """
+    `alpha(t) = sin(pi * t / 2)` schedule.
+    """
+
+    def alpha(self, t: Tensor) -> Tensor:
+        return (t * torch.pi / 2.0).sin()
+
+    def alpha_prime(self, t: Tensor) -> Tensor:
+        return ((t * torch.pi / 2.0).cos() * torch.pi / 2.0).clamp(min=1e-8)
 
 
 def time_schedule_from_name(name: str) -> TimeSchedule:
@@ -55,4 +79,6 @@ def time_schedule_from_name(name: str) -> TimeSchedule:
     return {
         "linear": LinearSchedule(),
         "quadratic": QuadraticSchedule(),
+        "sqrt": SqrtSchedule(),
+        "sine": SineSchedule(),
     }[name]

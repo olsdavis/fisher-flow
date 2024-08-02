@@ -21,7 +21,7 @@ data:
 
 trainer:
   min_epochs: 1
-  max_epochs: 100
+  max_epochs: 150
   gradient_clip_val: 1.0
 
 model:
@@ -33,14 +33,15 @@ model:
     groups_norm: 64
     activation: swish
   compile: false
-  manifold: sphere
+  manifold: simplex
   inference_steps: 250
   x1_pred: true
+  time_schedule: linear
 
 logger:
   wandb:
     tags: ${tags}
-    name: cifar_unet_lg_xpred_${model.manifold}_${seed}
+    name: cifar_unet_lg_xpred_${model.manifold}_${model.time_schedule}_${seed}
     group: "cifar-unet-lg-xpred"
     project: sfm-cifar
   aim:
