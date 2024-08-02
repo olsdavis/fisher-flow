@@ -2,7 +2,6 @@
 Module for flow models over images.
 """
 from abc import ABC, abstractmethod
-import os
 import tqdm
 import numpy as np
 from lightning import LightningModule
@@ -126,6 +125,7 @@ class ImageFlowModule(FlowModule):
         self,
         fid_freq: int = 5,
         x1_pred: bool = False,
+        target_approx: bool = False,
         **kwargs,
     ):
         super().__init__(
@@ -133,6 +133,7 @@ class ImageFlowModule(FlowModule):
         )
         self.fid_freq = fid_freq
         self.x1_pred = x1_pred
+        self.target_approx = target_approx
 
     def on_fit_start(self):
         # update once
@@ -160,8 +161,8 @@ class ImageFlowModule(FlowModule):
             return points_at_time_t
         return path
 
-    def compute_target(self, x_0: Tensor, x_1: Tensor, time: Tensor, approx: bool = False) -> tuple[Tensor, Tensor]:
-        if approx:
+    def compute_target(self, x_0: Tensor, x_1: Tensor, time: Tensor) -> tuple[Tensor, Tensor]:
+        if self.target_approx:
             with torch.inference_mode(False):
                 def cond_u(x0, x1, t):
                     path = self.geodesic(self.manifold.sphere, x0, x1)
@@ -180,7 +181,7 @@ class ImageFlowModule(FlowModule):
 
     @torch.inference_mode()
     def image_to_one_hot_float(self, x: Tensor) -> Tensor:
-        return F.one_hot(x.long(), num_classes=256).float()
+        return F.one_hot((255.0 * x).long(), num_classes=256).float()
 
     def forward(self, x: Tensor | list[Tensor]) -> Tensor:
         if isinstance(x, list):
@@ -193,7 +194,8 @@ class ImageFlowModule(FlowModule):
         # sample noise
         x_0 = self.manifold.uniform_prior(b, c * h * w, bits, device=self.device)
         x_1 = x.reshape(b, c * h * w, bits)
-        x_0 = x_1
+        if isinstance(self.manifold, NSimplex):
+            x = self.manifold.smooth_labels(x, 0.999)
         t = torch.rand(b, 1, device=self.device)
 
         # loss for x_1 pred mode
