@@ -32,7 +32,6 @@ model:
   inference_steps: 250
   x1_pred: true
   time_schedule: linear
-  ot: false
   time_eps: 1.0e-3
 
 logger:
