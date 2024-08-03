@@ -21,6 +21,9 @@ trainer:
   max_epochs: 100
   gradient_clip_val: 1.0
 
+data:
+  batch_size: 192
+
 model:
   optimizer:
     lr: 0.0001
@@ -29,12 +32,13 @@ model:
   inference_steps: 250
   x1_pred: true
   time_schedule: linear
+  ot: true
   time_eps: 1.0e-3
 
 logger:
   wandb:
     tags: ${tags}
-    name: cifar_unet_xpred_${model.manifold}_${model.time_schedule}_${seed}
+    name: cifar_unet_ot_xpred_${model.manifold}_${model.time_schedule}_${seed}
     group: "cifar-unet-xpred"
     project: sfm-cifar
   aim:

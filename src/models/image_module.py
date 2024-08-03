@@ -14,7 +14,13 @@ from torchmetrics.image import FrechetInceptionDistance as FID
 from torchvision.utils import make_grid
 from torchvision.transforms import ToPILImage
 from einops import rearrange
-from src.sfm import Manifold, NSimplex, manifold_from_name, time_schedule_from_name
+from src.sfm import (
+    Manifold,
+    NSimplex,
+    OTSampler,
+    manifold_from_name,
+    time_schedule_from_name,
+)
 
 
 class TangentWrapper(nn.Module):
@@ -127,6 +133,7 @@ class ImageFlowModule(FlowModule):
         x1_pred: bool = False,
         target_approx: bool = False,
         time_eps: float = 0.0,
+        ot: bool = False,
         **kwargs,
     ):
         super().__init__(
@@ -136,6 +143,8 @@ class ImageFlowModule(FlowModule):
         self.x1_pred = x1_pred
         self.target_approx = target_approx
         self.time_eps = time_eps
+        self.ot = ot
+        self.sampler = OTSampler(self.manifold, method="exact")
 
     def on_fit_start(self):
         # update once
@@ -198,6 +207,8 @@ class ImageFlowModule(FlowModule):
         x_1 = x.reshape(b, c * h * w, bits)
         if isinstance(self.manifold, NSimplex):
             x = self.manifold.smooth_labels(x, 0.999)
+        if self.ot:
+            x_0, x_1 = self.sampler.sample_plan(x_0, x_1)
         t = torch.rand(b, 1, device=self.device) * (1.0 - self.time_eps) + self.time_eps
 
         # loss for x_1 pred mode
