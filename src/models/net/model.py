@@ -4,6 +4,7 @@ import torch
 from torch import Tensor, nn
 import torch.nn.functional as F
 import numpy as np
+from torchcfm.models.unet import UNetModel as CFMUNet
 from src.sfm import Manifold
 
 
@@ -557,7 +558,6 @@ class BestSignalMLP(nn.Module):
         return self._missing_coordinate
 
 
-
 class BestEnhancerMLP(nn.Module):
     def __init__(
         self,
@@ -693,6 +693,49 @@ class MegaUNet2DModel(nn.Module):
 
     def forward(self, x: Tensor, t: Tensor) -> Tensor:
         return self.diffusers_unet(x, t.squeeze(), return_dict=False)[0]
+
+
+class CFMUNetModel(nn.Module):
+    """
+        image_size,
+        in_channels,
+        model_channels,
+        out_channels,
+        num_res_blocks,
+        attention_resolutions,
+        dropout=0,
+        channel_mult=(1, 2, 4, 8),
+        conv_resample=True,
+        dims=2,
+        num_classes=None,
+        use_checkpoint=False,
+        use_fp16=False,
+        num_heads=1,
+        num_head_channels=-1,
+        num_heads_upsample=-1,
+        use_scale_shift_norm=False,
+        resblock_updown=False,
+        use_new_attention_order=False,
+    """
+
+    def __init__(
+        self,
+        k: int,
+        dim: int,
+        filters: int = 128,
+        resnets: int = 2,
+        heads: int = 4,
+    ):
+        super().__init__()
+        self.net = CFMUNet(
+            dim=(k, dim, dim),
+            num_channels=filters,
+            num_res_blocks=resnets,
+            num_heads=heads,
+        )
+
+    def forward(self, x: Tensor, t: Tensor) -> Tensor:
+        return self.net(x=x, t=t.squeeze())
 
 
 class SimpleSineEmbedding(nn.Module):

@@ -126,6 +126,7 @@ class ImageFlowModule(FlowModule):
         fid_freq: int = 5,
         x1_pred: bool = False,
         target_approx: bool = False,
+        time_eps: float = 0.0,
         **kwargs,
     ):
         super().__init__(
@@ -134,6 +135,7 @@ class ImageFlowModule(FlowModule):
         self.fid_freq = fid_freq
         self.x1_pred = x1_pred
         self.target_approx = target_approx
+        self.time_eps = time_eps
 
     def on_fit_start(self):
         # update once
@@ -196,7 +198,7 @@ class ImageFlowModule(FlowModule):
         x_1 = x.reshape(b, c * h * w, bits)
         if isinstance(self.manifold, NSimplex):
             x = self.manifold.smooth_labels(x, 0.999)
-        t = torch.rand(b, 1, device=self.device)
+        t = torch.rand(b, 1, device=self.device) * (1.0 - self.time_eps) + self.time_eps
 
         # loss for x_1 pred mode
         if self.x1_pred:

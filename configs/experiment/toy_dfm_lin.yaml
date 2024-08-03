@@ -4,38 +4,45 @@
 # python train.py experiment=example
 
 defaults:
-  - override /data: cifar
-  - override /model: cifar_unet2d
+  - override /data: toy_dfm
+  - override /model: toy_bmlp
   - override /callbacks: default
   - override /trainer: default
 
 # all parameters below will be merged with parameters from default configurations set above
 # this allows you to overwrite only specified parameters
 
-tags: ["cifar", "unet", "x1_pred"]
+tags: ["toy_dfm", "bmlp"]
 
 seed: 12345
 
 trainer:
   min_epochs: 1
-  max_epochs: 100
+  max_epochs: 1000
   gradient_clip_val: 1.0
 
 model:
   optimizer:
-    lr: 0.0001
+    lr: 0.001
+  net:
+    k: ${data.k}
+    dim: ${data.dim}
+    missing_coordinate: false
   compile: false
-  manifold: sphere
-  inference_steps: 250
-  x1_pred: true
-  time_schedule: linear
-  time_eps: 1.0e-3
+  manifold: "euclidean"
+  kl_eval: true
+  ot_method: None
+  closed_form_drv: false
+
+data:
+  batch_size: 512
+  k: 4
+  dim: 100
 
 logger:
   wandb:
     tags: ${tags}
-    name: cifar_unet_xpred_${model.manifold}_${model.time_schedule}_${seed}
-    group: "cifar-unet-xpred"
-    project: sfm-cifar
+    group: "toy_dfm"
+    name: toy_${data.k}_${data.dim}_${model.manifold}_${model.ot_method}
   aim:
-    experiment: "cifar"
+    experiment: "toy_dfm"
