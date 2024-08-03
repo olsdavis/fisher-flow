@@ -36,7 +36,7 @@ model:
 logger:
   wandb:
     tags: ${tags}
-    name: cifar_mega_${model.manifold}_${model.time_schedule}_${seed}
+    name: cifar_cfm_${model.manifold}_${model.time_schedule}_${seed}
     group: "cifar-mega"
     project: sfm-cifar
   aim:
