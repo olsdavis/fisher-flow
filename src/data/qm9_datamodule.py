@@ -25,9 +25,9 @@ class MoleculeDataModule(LightningDataModule):
         super().__init__()
         self.distributed = distributed
         self.dataset_config = {
-            'processed_data_dir': 'data/qm9',
-            'raw_data_dir': 'data/qm9_raw',
-            'dataset_name': 'qm9',
+            'processed_data_dir': 'data/geom',
+            'raw_data_dir': 'data/geom_raw',
+            'dataset_name': 'geom',
         }
         self.batch_size = batch_size
         self.num_workers = num_workers
