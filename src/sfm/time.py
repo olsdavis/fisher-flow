@@ -72,6 +72,18 @@ class SineSchedule(TimeSchedule):
         return ((t * torch.pi / 2.0).cos() * torch.pi / 2.0).clamp(min=1e-8)
 
 
+class CubicSchedule(TimeSchedule):
+    """
+    `alpha(t) = 1 - (1 - t)^3` schedule.
+    """
+
+    def alpha(self, t: Tensor) -> Tensor:
+        return 1.0 - (1.0 - t).pow(3)
+
+    def alpha_prime(self, t: Tensor) -> Tensor:
+        return 3.0 * (1.0 - t).pow(2)
+
+
 def time_schedule_from_name(name: str) -> TimeSchedule:
     """
     Returns the time schedule from its name.
@@ -81,4 +93,5 @@ def time_schedule_from_name(name: str) -> TimeSchedule:
         "quadratic": QuadraticSchedule(),
         "sqrt": SqrtSchedule(),
         "sine": SineSchedule(),
+        "cubic": CubicSchedule(),
     }[name]
