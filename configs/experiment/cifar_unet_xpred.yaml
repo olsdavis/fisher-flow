@@ -31,13 +31,13 @@ model:
   manifold: sphere
   inference_steps: 250
   x1_pred: true
-  time_schedule: linear
-  time_eps: 1.0e-3
+  time_schedule: quadratic
+  time_eps: 1.0e-5
 
 logger:
   wandb:
     tags: ${tags}
-    name: cifar_unet_ot_xpred_${model.manifold}_${model.time_schedule}_${seed}
+    name: cifar_unet_xpred_quad_50_${model.manifold}_${model.time_schedule}_${seed}
     group: "cifar-unet-xpred"
     project: sfm-cifar
   aim:

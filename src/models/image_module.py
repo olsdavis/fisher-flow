@@ -2,6 +2,7 @@
 Module for flow models over images.
 """
 from abc import ABC, abstractmethod
+from contextlib import nullcontext
 import tqdm
 import numpy as np
 from lightning import LightningModule
@@ -13,6 +14,7 @@ from torchmetrics import MeanMetric
 from torchmetrics.image import FrechetInceptionDistance as FID
 from torchvision.utils import make_grid
 from torchvision.transforms import ToPILImage
+from torch_ema import ExponentialMovingAverage as EMA
 from einops import rearrange
 from src.sfm import (
     Manifold,
@@ -61,6 +63,8 @@ class FlowModule(ABC, LightningModule):
         manifold: str = "simplex",
         inference_steps: int = 100,
         time_schedule: str = "linear",
+        ema: bool = False,
+        ema_decay: float = 0.9,
     ):
         super().__init__()
         self.save_hyperparameters(logger=False, ignore=["net", "fid"])
@@ -77,6 +81,15 @@ class FlowModule(ABC, LightningModule):
             self.net = TangentWrapper(net, self.manifold)
         if fast_matmul:
             torch.set_float32_matmul_precision("high")
+        if ema:
+            self.ema = EMA(self.net.parameters(), decay=ema_decay).to(self.device)
+        else:
+            self.ema = None
+
+    def optimizer_step(self, *args, **kwargs):
+        super().optimizer_step(*args, **kwargs)
+        if self.ema is not None:
+            self.ema.update()
 
     @abstractmethod
     def forward(self, x: Tensor) -> Tensor:
@@ -134,17 +147,21 @@ class ImageFlowModule(FlowModule):
         target_approx: bool = False,
         time_eps: float = 0.0,
         ot: bool = False,
+        mask: bool = False,
+        mask_schedule: str = "linear",
         **kwargs,
     ):
         super().__init__(
             **kwargs,
         )
+        self.mask_schedule = time_schedule_from_name(mask_schedule)
         self.fid_freq = fid_freq
         self.x1_pred = x1_pred
         self.target_approx = target_approx
         self.time_eps = time_eps
         self.ot = ot
         self.sampler = OTSampler(self.manifold, method="exact")
+        self.mask = mask
 
     def on_fit_start(self):
         # update once
@@ -192,12 +209,52 @@ class ImageFlowModule(FlowModule):
 
     @torch.inference_mode()
     def image_to_one_hot_float(self, x: Tensor) -> Tensor:
-        return F.one_hot((255.0 * x).long(), num_classes=256).float()
+        return F.one_hot((255.0 * x).long(), num_classes=257 if self.mask else 256).float()
+
+    def mask_sample(self, x: Tensor, probs: Tensor) -> Tensor:
+        while probs.dim() < x.dim():
+            probs = probs.unsqueeze(-1)
+        mask = (torch.rand(*x.shape, device=x.device) < probs)
+        return torch.where(mask, 255+1, x)
+
+    def masked_forward(self, x: Tensor) -> Tensor:
+        # B, C, H, W, bits is x_0
+        target = (x * 255.0).long()
+        x = self.image_to_one_hot_float(x)
+        b, c, h, w, bits = x.shape
+        # sample noise
+        x_1 = rearrange(x, "b c h w k -> b (c h w) k", h=h, w=w, c=c, b=b, k=bits)
+        x_0 = self.manifold.uniform_prior(b, c * h * w, bits, device=x.device)
+        t = torch.rand(b, 1, device=x.device) * (1.0 - self.time_eps) + self.time_eps
+        x_t = self.manifold.geodesic_interpolant(x_0, x_1, t)
+        # masked probabilities
+        mask_probs = self.mask_schedule.alpha(1.0 - t)
+        x_masked = rearrange(
+            F.one_hot(self.mask_sample(target, mask_probs), num_classes=bits).float(),
+            "b c h w k -> b (c h w) k",
+            b=b, c=c, h=h, w=w, k=bits,
+        )
+        if isinstance(self.manifold, NSimplex):
+            x_masked = self.manifold.smooth_labels(x_masked, 0.999)
+        alpha_t = self.time_schedule.alpha(t)[..., None]
+
+        # final calculations
+        final_x_t = (1.0 - alpha_t) * x_t + alpha_t * x_masked
+        final_x_t = rearrange(final_x_t, "b (c h w) k -> b (c k) h w", h=h, w=w, c=c, b=b, k=bits)
+        out = self.net(final_x_t, t)
+        return F.cross_entropy(
+            rearrange(out, "b (c k) h w -> b k c h w", h=h, w=w, c=c, b=b, k=bits),
+            target,
+            reduction="mean",
+        )
+
 
     def forward(self, x: Tensor | list[Tensor]) -> Tensor:
         if isinstance(x, list):
             # labelled dataset, e.g., CIFAR-10
             x = x[0]
+        if self.mask:
+            return self.masked_forward(x)
 
         # B, C, H, W, bits is x_0
         x = self.image_to_one_hot_float(x)
@@ -240,7 +297,9 @@ class ImageFlowModule(FlowModule):
         h = 32
         w = 32
         c = 3
-        bits = 256
+        bits = 256 + (1 if self.mask else 0)
+        mx = 0.999
+        coeff = (1.0 - mx) / (bits - 1)
 
         manifold_shape = (batch_size, c * h * w, bits)
         x_0 = self.manifold.uniform_prior(
@@ -263,6 +322,14 @@ class ImageFlowModule(FlowModule):
             # out = out.reshape(batch_size, h * w * c, bits)
             out = rearrange(out, "b (c k) h w -> b (c h w) k", h=h, w=w, c=c, b=batch_size, k=bits)
             if self.x1_pred:
+                if self.mask and s.item() < 1.0:
+                    # mask the vectors randomly with the mask schedule
+                    mask_probs = self.mask_schedule.alpha(1.0 - s)
+                    masker = torch.rand_like(out[..., :-1]) < mask_probs
+                    out_mask = out.clone()
+                    out_mask[..., :-1] = torch.where(masker, coeff, out_mask[..., :-1])
+                    out_mask[..., -1] = mx
+                    out = out_mask * (1.0 - self.time_schedule.alpha(s)) + out * self.time_schedule.alpha(s)
                 vec = self.manifold.log_map(
                     x_prev,
                     NSimplex().send_to(
@@ -277,16 +344,17 @@ class ImageFlowModule(FlowModule):
 
         # argmax the colours
         x = x.reshape(batch_size, c, h, w, bits)
-        x = x.argmax(dim=-1).float()
+        x = x.argmax(dim=-1).float().clamp(0.0, 255.0)
         # make images between 0 and 1, and floats
         return x.float() / 255.0
 
     def generate_image_collection(self, n: int = 10000, batch_size: int = 256) -> Tensor:
         images = []
-        while sum(t.shape[0] for t in images) < n:
-            print("starting to generate...")
-            images += [self.generate_image_batch(min(batch_size, n - len(images)))]
-            print("done batch!")
+        with self.ema.average_parameters() if self.ema is not None else nullcontext():
+            while sum(t.shape[0] for t in images) < n:
+                print("starting to generate...")
+                images += [self.generate_image_batch(min(batch_size, n - len(images)))]
+                print("done batch!")
         return torch.cat(images, dim=0)
 
     @torch.inference_mode()
