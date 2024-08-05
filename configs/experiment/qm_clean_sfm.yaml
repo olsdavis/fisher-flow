@@ -41,7 +41,7 @@ model:
     c: 1.0
     e: 2.0
   atom_type_map: ['C', 'H', 'N', 'O', 'F']
-  eval_mols_every: 1
+  eval_mols_every: 5
   n_eval_mols: 128
   net:
     n_atom_types: 5
@@ -52,7 +52,7 @@ logger:
   wandb:
     tags: ${tags}
     group: "qm9"
-    name: qm9_s${seed}_cosine_${model.features_manifolds.a}
+    name: qm9_s${seed}_concentrated_${model.features_manifolds.a}
     project: sfm-qm9
   aim:
     experiment: "qm9"

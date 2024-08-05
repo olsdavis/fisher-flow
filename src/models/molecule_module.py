@@ -4,7 +4,6 @@ A module for molecular generative tasks, namely: QM9, GeomDrugs, Retrosynthesis.
 from abc import ABC, abstractmethod
 from typing import Any
 from torch_geometric.data import Batch as TGBatch
-from torch_geometric.utils import to_dense_batch
 import torch
 from torch import Tensor
 from torch.nn import functional as F
@@ -36,7 +35,7 @@ class Prior(ABC):
         self.manifold = manifold
 
     @abstractmethod
-    def sample(self, n: int, k: int, d: int) -> Tensor:
+    def sample(self, n: int, k: int, d: int, device: str = "cpu") -> Tensor:
         """
         Samples `n` points from the prior.
         """
@@ -47,8 +46,8 @@ class UniformPrior(Prior):
     A uniform prior distribution.
     """
 
-    def sample(self, n: int, k: int, d: int) -> Tensor:
-        return self.manifold.uniform_prior(n, k, d)
+    def sample(self, n: int, k: int, d: int, device: str = "cpu") -> Tensor:
+        return self.manifold.uniform_prior(n, k, d, device=device)
 
 
 class VonMisesFisherPrior(Prior):
@@ -66,12 +65,12 @@ class PushingNormalPrior(Prior):
     that is tangent to that point.
     """
 
-    def sample(self, n: int, k: int, d: int) -> Tensor:
+    def sample(self, n: int, k: int, d: int, device: str = "cpu") -> Tensor:
         # first, do the thing on the simplex
         simplex = NSimplex()
         # start at the center
-        x = torch.ones((n, k, d)) / d
-        direction = torch.randn((n, k, d))
+        x = torch.ones((n, k, d), device=device) / d
+        direction = torch.randn((n, k, d), device=device)
         # make tangent
         direction = direction - direction.mean(dim=0, keepdim=True)
         # move on the manifold by an exp map
@@ -98,8 +97,8 @@ class CenteredGaussianPrior(GaussianPrior):
     A Gaussian prior distribution centered at the mean of the training data.
     """
 
-    def sample(self, n: int, k: int, d: int) -> Tensor:
-        ret = torch.randn((n, k * d))
+    def sample(self, n: int, k: int, d: int, device: str = "cpu") -> Tensor:
+        ret = torch.randn((n, k * d), device=device)
         ret = ret - ret.mean(dim=0, keepdim=True)
         return ret.reshape(n, k, d)
 
@@ -295,18 +294,20 @@ class MoleculeModule(LightningModule):
         # initialise priors
         for key, prior in self.features_priors.items():
             if key == "e":
-                put = torch.zeros(inp.num_edges(), self.features_lengths["e"])
+                put = torch.zeros(inp.num_edges(), self.features_lengths["e"], device=self.device)
                 upper = get_upper_edge_mask(inp)
-                sampled_edge_prior = prior.sample(upper.sum().item(), 1, self.features_lengths["e"]).squeeze()
+                sampled_edge_prior = prior.sample(
+                    upper.sum().item(), 1, self.features_lengths["e"], device=self.device
+                ).squeeze()
                 put[upper] = sampled_edge_prior
                 put[~upper] = sampled_edge_prior
-                inp.edata["e_0"] = put.to(self.device)
+                inp.edata["e_0"] = put
             else:
                 if key == "x" and not do_x:
                     continue
                 # x is set in the dataset because it requires the alignment to be done on CPU
-                p = prior.sample(inp.num_nodes(), 1, self.features_lengths[key]).squeeze()
-                inp.ndata[f"{key}_0"] = p.to(self.device)
+                p = prior.sample(inp.num_nodes(), 1, self.features_lengths[key], device=self.device).squeeze()
+                inp.ndata[f"{key}_0"] = p
 
         for key, manifold in self.features_manifolds.items():
             # ensure is on the manifold
