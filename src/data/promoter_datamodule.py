@@ -132,6 +132,7 @@ if __name__ == "__main__":
     mod = PromoterDesignDataModule()
     mod.prepare_data()
     mod.setup()
+    import ipdb; ipdb.set_trace()
     data_loader = mod.train_dataloader()
     x = next(iter(data_loader))
     print(type(x))
