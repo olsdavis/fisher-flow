@@ -245,7 +245,7 @@ class Manifold(ABC):
         """
 
     @abstractmethod
-    def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
+    def uniform_prior(self, n: int, k: int, d: int, device: str = "cpu") -> Tensor:
         """
         Returns samples from a uniform prior on the manifold.
         """
@@ -363,11 +363,11 @@ class NSimplex(Manifold):
             return torch.cat([v, -v.sum(dim=-1, keepdim=True)], dim=-1)
         return v - v.mean(dim=-1, keepdim=True)
 
-    def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
+    def uniform_prior(self, n: int, k: int, d: int, device: str = "cpu") -> Tensor:
         """
         See `Manifold.uniform_prior`.
         """
-        return Dirichlet(torch.ones((k, d))).sample((n,))
+        return Dirichlet(torch.ones((k, d), device=device)).sample((n,))
 
     @torch.no_grad()
     def smooth_labels(self, labels: Tensor, mx: float = 0.98) -> Tensor:
@@ -513,11 +513,11 @@ class NSphere(Manifold):
         # ret[:, :, 0] = ret[:, :, 0] - (p * ret).sum(dim=-1)
         return ret
 
-    def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
+    def uniform_prior(self, n: int, k: int, d: int, device: str = "cpu") -> Tensor:
         """
         See `Manifold.uniform_prior`.
         """
-        x_0 = torch.randn((n, k, d))
+        x_0 = torch.randn((n, k, d), device=device)
         x_0 = x_0 / x_0.norm(p=2, dim=-1, keepdim=True)
         return x_0.abs()
 
@@ -606,8 +606,8 @@ class GeooptSphere(Manifold):
         p[~mask, :] = self.project(p[~mask, :])
         return p
 
-    def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
-        ret = self.sphere.random_uniform((n, k, d)).abs()
+    def uniform_prior(self, n: int, k: int, d: int, device: str = "cpu") -> Tensor:
+        ret = self.sphere.random_uniform((n, k, d), device=device).abs()
         return ret
 
     def smooth_labels(self, labels: Tensor, mx: float = 0.98) -> Tensor:
@@ -649,8 +649,8 @@ class LinearNSimplex(NSimplex):
     def parallel_transport(self, p: Tensor, q: Tensor, v: Tensor) -> Tensor:
         return v
 
-    def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
-        return NSimplex().uniform_prior(n, k, d)
+    def uniform_prior(self, n: int, k: int, d: int, device: str = "cpu") -> Tensor:
+        return NSimplex().uniform_prior(n, k, d, device=device)
 
     def all_belong_tangent(self, x: Tensor, v: Tensor) -> bool:
         return torch.allclose(fast_dot(x, v), torch.tensor(0.0))
@@ -675,8 +675,8 @@ class Euclidean(Manifold):
     def make_tangent(self, p: Tensor, v: Tensor, missing_coordinate: bool = False) -> Tensor:
         return v
 
-    def uniform_prior(self, n: int, k: int, d: int) -> Tensor:
-        return torch.randn((n, k, d))
+    def uniform_prior(self, n: int, k: int, d: int, device: str = "cpu") -> Tensor:
+        return torch.randn((n, k, d), device=device)
 
     def smooth_labels(self, labels: Tensor, mx: float = 0.98) -> Tensor:
         return labels

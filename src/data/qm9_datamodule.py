@@ -21,13 +21,14 @@ class MoleculeDataModule(LightningDataModule):
         num_workers: int = 0,
         distributed: bool = False,
         max_num_edges: int = 40000,
+        dataset: str = "qm9",
     ):
         super().__init__()
         self.distributed = distributed
         self.dataset_config = {
-            'processed_data_dir': 'data/qm9',
-            'raw_data_dir': 'data/qm9_raw',
-            'dataset_name': 'qm9',
+            'processed_data_dir': f'data/{dataset}',
+            'raw_data_dir': f'data/{dataset}_raw',
+            'dataset_name': dataset,
         }
         self.batch_size = batch_size
         self.num_workers = num_workers

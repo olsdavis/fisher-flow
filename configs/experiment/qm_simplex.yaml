@@ -16,18 +16,15 @@ tags: ["qm9", "vecfield"]
 
 seed: 12345
 
-data:
-  batch_size: 512
-
 trainer:
-  min_epochs: 500
-  max_epochs: 500
+  min_epochs: 400
+  max_epochs: 400
   gradient_clip_val: 1.0
 
 model:
   compile: false
   conditional: false
-  inference_steps: 100
+  inference_steps: 200
   features_manifolds:
     x: euclidean
     a: simplex
@@ -39,25 +36,24 @@ model:
     e: uniform
     c: uniform
   loss_weights:
-    x: 3.0
-    a: 0.4
+    x: 1.0
+    a: 1.0
     c: 1.0
-    e: 2.0
+    e: 1.0
   atom_type_map: ['C', 'H', 'N', 'O', 'F']
-  eval_mols_every: 5
+  eval_mols_every: 10
   n_eval_mols: 128
   time_weighted_loss: true
   net:
     n_atom_types: 5
     features_manifolds: ${model.features_manifolds}
     interpolant_scheduler: linear
-    n_recycles: 3
 
 logger:
   wandb:
     tags: ${tags}
     group: "qm9"
-    name: s${seed}_deep_tw_${model.features_manifolds.a}
+    name: qm9_s${seed}_linear_simplex
     project: sfm-qm9
   aim:
     experiment: "qm9"

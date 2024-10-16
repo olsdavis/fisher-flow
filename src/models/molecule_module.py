@@ -4,7 +4,6 @@ A module for molecular generative tasks, namely: QM9, GeomDrugs, Retrosynthesis.
 from abc import ABC, abstractmethod
 from typing import Any
 from torch_geometric.data import Batch as TGBatch
-from torch_geometric.utils import to_dense_batch
 import torch
 from torch import Tensor
 from torch.nn import functional as F
@@ -36,7 +35,7 @@ class Prior(ABC):
         self.manifold = manifold
 
     @abstractmethod
-    def sample(self, n: int, k: int, d: int) -> Tensor:
+    def sample(self, n: int, k: int, d: int, device: str = "cpu") -> Tensor:
         """
         Samples `n` points from the prior.
         """
@@ -47,8 +46,8 @@ class UniformPrior(Prior):
     A uniform prior distribution.
     """
 
-    def sample(self, n: int, k: int, d: int) -> Tensor:
-        return self.manifold.uniform_prior(n, k, d)
+    def sample(self, n: int, k: int, d: int, device: str = "cpu") -> Tensor:
+        return self.manifold.uniform_prior(n, k, d, device=device)
 
 
 class VonMisesFisherPrior(Prior):
@@ -66,12 +65,12 @@ class PushingNormalPrior(Prior):
     that is tangent to that point.
     """
 
-    def sample(self, n: int, k: int, d: int) -> Tensor:
+    def sample(self, n: int, k: int, d: int, device: str = "cpu") -> Tensor:
         # first, do the thing on the simplex
         simplex = NSimplex()
         # start at the center
-        x = torch.ones((n, k, d)) / d
-        direction = torch.randn((n, k, d))
+        x = torch.ones((n, k, d), device=device) / d
+        direction = torch.randn((n, k, d), device=device)
         # make tangent
         direction = direction - direction.mean(dim=0, keepdim=True)
         # move on the manifold by an exp map
@@ -98,8 +97,8 @@ class CenteredGaussianPrior(GaussianPrior):
     A Gaussian prior distribution centered at the mean of the training data.
     """
 
-    def sample(self, n: int, k: int, d: int) -> Tensor:
-        ret = torch.randn((n, k * d))
+    def sample(self, n: int, k: int, d: int, device: str = "cpu") -> Tensor:
+        ret = torch.randn((n, k * d), device=device)
         ret = ret - ret.mean(dim=0, keepdim=True)
         return ret.reshape(n, k, d)
 
@@ -135,8 +134,10 @@ class MoleculeModule(LightningModule):
         inference_steps: int = 100,
         features_priors: dict[str, str] | None = None,
         loss_weights: dict[str, float] | None = None,
-        eval_mols_every: int = 1,
+        eval_mols_every: int = 5,
         n_eval_mols: int = 128,
+        time_weighted_loss: bool = False,
+        inference_scaling: float | None = None,
     ):
         """
         Parameters:
@@ -175,6 +176,8 @@ class MoleculeModule(LightningModule):
         self.inference_steps = inference_steps
         self.eval_mols_every = eval_mols_every
         self.n_eval_mols = n_eval_mols
+        self.time_weighted_loss = time_weighted_loss
+        self.inference_scaling = inference_scaling
 
         # for averaging loss across batches
         self.train_loss = MeanMetric()
@@ -234,6 +237,7 @@ class MoleculeModule(LightningModule):
             upper_edge_mask=upper_edge_mask,
             n_timesteps=n_timesteps,
             visualize=False,
+            inference_scaling=self.inference_scaling,
         )
 
         g = itg_result
@@ -290,18 +294,20 @@ class MoleculeModule(LightningModule):
         # initialise priors
         for key, prior in self.features_priors.items():
             if key == "e":
-                put = torch.zeros(inp.num_edges(), self.features_lengths["e"])
+                put = torch.zeros(inp.num_edges(), self.features_lengths["e"], device=self.device)
                 upper = get_upper_edge_mask(inp)
-                sampled_edge_prior = prior.sample(upper.sum().item(), 1, self.features_lengths["e"]).squeeze()
+                sampled_edge_prior = prior.sample(
+                    upper.sum().item(), 1, self.features_lengths["e"], device=self.device
+                ).squeeze()
                 put[upper] = sampled_edge_prior
                 put[~upper] = sampled_edge_prior
-                inp.edata["e_0"] = put.to(self.device)
+                inp.edata["e_0"] = put
             else:
                 if key == "x" and not do_x:
                     continue
                 # x is set in the dataset because it requires the alignment to be done on CPU
-                p = prior.sample(inp.num_nodes(), 1, self.features_lengths[key]).squeeze()
-                inp.ndata[f"{key}_0"] = p.to(self.device)
+                p = prior.sample(inp.num_nodes(), 1, self.features_lengths[key], device=self.device).squeeze()
+                inp.ndata[f"{key}_0"] = p
 
         for key, manifold in self.features_manifolds.items():
             # ensure is on the manifold
@@ -325,27 +331,29 @@ class MoleculeModule(LightningModule):
         # now, forward through model
         output = self.net(inp, t, node_batch_idx, upper, apply_softmax=False, remove_com=False)
         losses = {}
+        reduction = "none" if self.time_weighted_loss else "mean"
         for key in self.features_manifolds.keys():
             lw = all_lw[:, ["x", "a", "c", "e"].index(key)]
             if key == "x":
                 losses[key] = F.mse_loss(
-                    output[key], inp.ndata[f"{key}_1_true"], reduction="none",
+                    output[key], inp.ndata[f"{key}_1_true"], reduction=reduction,
                 )
             else:
                 losses[key] = F.cross_entropy(
                     output[key],
                     (inp.ndata[f"{key}_1_true"] if key != "e" else inp.edata[f"{key}_1_true"][upper]).argmax(dim=-1),
-                    reduction="none",
+                    reduction=reduction,
                 )
-            if key == "e":
-                # apply the weights
-                losses[key] = losses[key] * lw[edge_batch_idx][upper]
-            else:
-                use_lw = lw[node_batch_idx]
-                if key == "x":
-                    use_lw = use_lw.unsqueeze(-1)
-                losses[key] = losses[key] * use_lw
-            losses[key] = losses[key].mean()
+            if self.time_weighted_loss:
+                if key == "e":
+                    # apply the weights
+                    losses[key] = losses[key] * lw[edge_batch_idx][upper]
+                else:
+                    use_lw = lw[node_batch_idx]
+                    if key == "x":
+                        use_lw = use_lw.unsqueeze(-1)
+                    losses[key] = losses[key] * use_lw
+                losses[key] = losses[key].mean()
         return losses
 
     def model_step(self, inp: GraphData) -> dict[str, Tensor]:
@@ -447,6 +455,12 @@ class MoleculeModule(LightningModule):
 
     def on_test_epoch_end(self):
         """Lightning hook that is called when a test epoch ends."""
+
+        molecules = self.sample_random_sizes(10000, n_timesteps=self.inference_steps)
+        analyzer = SampleAnalyzer()
+        stats = analyzer.analyze(molecules)
+        for key, value in stats.items():
+            self.log(f"test/{key}", value, on_step=False, on_epoch=True, prog_bar=False)
 
     def setup(self, stage: str):
         """Lightning hook that is called at the beginning of fit (train + validate), validate,
