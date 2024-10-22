@@ -23,7 +23,7 @@ class DNAEnhancerDataModule(LightningDataModule):
         """Initialize a `DNAEnhancerDataModule`.
 
         :param dataset: The dataset to use, choices: "MEL2", "FlyBrain". Defaults to `"MEL2"`.
-        :param data_dir: The data directory. Defaults to `"data/text8"`.
+        :param data_dir: The data directory.
         :param train_val_test_split: Not used. The train, validation and test split. Defaults to `(55_000, 5_000, 10_000)`.
         :param batch_size: The batch size. Defaults to `64`.
         :param num_workers: The number of workers. Defaults to `0`.

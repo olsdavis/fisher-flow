@@ -8,8 +8,6 @@ from lightning import Callback, LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.loggers import Logger
 from omegaconf import DictConfig
 
-from src.data import RetroBridgeDataModule
-import ipdb
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 # ------------------------------------------------------------------------------------ #
@@ -61,10 +59,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data)
 
     log.info(f"Instantiating model <{cfg.model._target_}>")
-    if isinstance(datamodule, RetroBridgeDataModule):
-        model: LightningModule = hydra.utils.instantiate(cfg.model, datamodule=datamodule)
-    else:
-        model: LightningModule = hydra.utils.instantiate(cfg.model)
+    model: LightningModule = hydra.utils.instantiate(cfg.model)
 
     log.info("Instantiating callbacks...")
     callbacks: List[Callback] = instantiate_callbacks(cfg.get("callbacks"))

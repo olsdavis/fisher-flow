@@ -1,3 +1,4 @@
+# Taken from https://github.com/Dunni3/FlowMol
 from torch.distributions import Exponential
 from scipy.optimize import linear_sum_assignment
 import torch

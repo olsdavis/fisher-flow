@@ -3,11 +3,11 @@
 from setuptools import find_packages, setup
 
 setup(
-    name="simplex-flow",
+    name="fisher-flow",
     version="1.0.0",
     description="Fisher Flow Matching official implementation",
-    author="",
-    author_email="",
+    author="Oscar Davis, Samuel Kessler, Joey Bose",
+    author_email="oscar.davis@cs.ox.ac.uk",
     install_requires=["lightning", "hydra-core"],
     packages=find_packages(),
     # use this to customize global commands available in the terminal after installing the package

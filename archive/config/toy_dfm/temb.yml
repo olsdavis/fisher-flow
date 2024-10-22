@@ -1,7 +1,0 @@
-name: TembMLP
-depth: 4
-hidden: 512
-activation: lrelu
-emb_size: 64
-time_emb: sinusoidal
-input_emb: sinusoidal

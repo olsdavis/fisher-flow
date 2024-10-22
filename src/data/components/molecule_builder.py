@@ -1,3 +1,4 @@
+# Taken from https://github.com/Dunni3/FlowMol
 import torch
 from rdkit import Chem, RDLogger
 from rdkit.Geometry import Point3D

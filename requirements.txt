@@ -39,3 +39,4 @@ torch_geometric==2.5.3
 torchdiffeq==0.2.3
 schedulefree==1.2.5
 pydantic==2.7.1
+torch_ema==0.3.0

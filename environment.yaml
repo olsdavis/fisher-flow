@@ -61,6 +61,7 @@ dependencies:
     - hydra-optuna-sweeper
     - hydra-colorlog
     - rootutils
+    - torch_ema==0.3
 
   # --------- loggers --------- #
   # - wandb

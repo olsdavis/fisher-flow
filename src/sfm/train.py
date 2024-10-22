@@ -2,7 +2,7 @@
 import torch
 from torch import Tensor, nn, vmap
 from torch.func import jvp
-from src.sfm import Manifold, OTSampler, metropolis_sphere_perturbation, default_perturbation_schedule
+from src.sfm import Manifold, OTSampler
 
 
 def geodesic(manifold, start_point, end_point):
@@ -65,7 +65,6 @@ def cft_loss_function(
     sampler: OTSampler | None,
     extra_args: dict[str, Tensor] | None = None,
     closed_form_drv: bool = False,
-    stochastic: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor]:
     """
     Our CFT loss function. If `sampler` is provided, OT-CFT loss is calculated.
@@ -103,10 +102,6 @@ def cft_loss_function(
         x_t = x_t.squeeze()
         target = target.squeeze()
         assert m.all_belong_tangent(x_t, target)
-
-    if stochastic:
-        # corrupt the point
-        x_t = metropolis_sphere_perturbation(x_t, default_perturbation_schedule(t))
 
     # now calculate diffs
     out = model(x=x_t, t=t, **(extra_args or {}))

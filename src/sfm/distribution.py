@@ -9,7 +9,6 @@ from scipy.linalg import sqrtm
 import tqdm
 from torchdiffeq import odeint
 from geoopt import Euclidean, Manifold as GManifold, ProductManifold
-from transformers import GPTJForCausalLM, AutoTokenizer
 from src.sfm import Manifold, NSimplex
 
 
@@ -244,43 +243,6 @@ def compute_exact_loglikelihood(
         return torch.zeros(batch.shape[0]).to(batch)
 
 
-_gpt = None
-_tokenizer = None
-
-
-def _load_models(device) -> tuple[GPTJForCausalLM, AutoTokenizer]:
-    global _gpt, _tokenizer
-    if _gpt is None:
-        _gpt = GPTJForCausalLM.from_pretrained(
-            "EleutherAI/gpt-j-6b",
-            revision="float16",
-            torch_dtype=torch.float16,
-            cache_dir="./cache",
-        ).to(device)
-        _gpt.eval()
-    if _tokenizer is None:
-        _tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-j-6b")
-    return _gpt, _tokenizer
-
-
-@torch.no_grad()
-def eval_gpt_nll(
-    samples: list[str],
-    device="cuda",
-) -> float:
-    """
-    Evaluates the mean NLL of a list of samples using a pre-trained GPT model.
-
-    Parameters:
-        - `samples`: textual samples.
-    """
-    gpt, tokenizer = _load_models(device)
-    losses = []
-    for sample in samples:
-        input_ids = tokenizer(sample, return_tensors="pt").input_ids.to(device)
-        loss = gpt(input_ids, return_dict=True, labels=input_ids).loss
-        losses += [loss.item()]
-    return np.mean(losses)
 def get_wasserstein_dist(embeds1, embeds2):
     # Taken from: https://github.com/HannesStark/dirichlet-flow-matching/blob/main/utils/flow_utils.py#L38
     if np.isnan(embeds2).any() or np.isnan(embeds1).any() or len(embeds1) == 0 or len(embeds2) == 0:
