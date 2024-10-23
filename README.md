@@ -6,7 +6,7 @@ pip install dgl -f https://data.dgl.ai/wheels/torch-2.1/cu121/repo.html
 ```
 Our code contains parts of [FlowMol](https://github.com/Dunni3/FlowMol/tree/main) by Dunn and Koes [1] (most of QM9 experiments), [Riemannian-FM](https://github.com/facebookresearch/riemannian-fm) by Chen, et al. [2], and, for the baselines, [DFM](https://github.com/HannesStark/dirichlet-flow-matching/tree/main) by Stark, et al [3].
 
-## Toy Experiment
+## Toy Experiment
 For the DFM toy experiment, the following command allows us to run our code:
 ```bash
 python -m src.train experiment=toy_dfm_bmlp data.dim=100 trainer=gpu trainer.max_epochs=500
